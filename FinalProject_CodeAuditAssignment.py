@@ -51,6 +51,7 @@ for col in categorical_cols:
 
 import matplotlib.pyplot as plt
 
+
 # Plot distribution of the target variable
 adm_pat_icu['hospital_expire_flag'].value_counts().plot(kind='bar')
 plt.title('Distribution of Hospital Expire Flag')
@@ -117,6 +118,93 @@ plt.xlabel('Insurance')
 plt.ylabel('Death Rate')
 plt.show()
 
+
+
+#######
+# Domain Validation (Issue #4 form the audit report)
+# Audit Fix: Add validation of the dataset beofre preprocessing by checking temporal consistency
+# and clinically meaningful constraints. This follows the EDA process discussed in the lecture.
+# Therefore, EDA is followed by validation before cleaning
+#######
+
+date_columns= [
+    'admittime', 'dischtime',
+    'intime', 'outtime',
+    'dob', 'dod', 'deathtime'
+]
+
+for col in date_columns:
+    if col in adm_pat_icu.columns:
+        adm_pat_icu[col] = pd.to_datetime(adm_pat_icu[col])
+
+#Check that for all entries, patient admission occurs before discharge for all records
+invalid_admissions = adm_pat_icu[
+    adm_pat_icu["admittime"] > adm_pat_icu["dischtime"]
+]
+
+print("number of invalid dates for admission and discharge: Admissions after discharge:", len(invalid_admissions))
+
+# Check that for all entries, ICU admission is before ICU discharge
+invalid_icu = adm_pat_icu[
+    adm_pat_icu["intime"] > adm_pat_icu["outtime"]
+]
+
+print("ICU discharge before ICU admission:", len(invalid_icu))
+
+# Check for Negative length of stay
+negative_los = adm_pat_icu[
+    adm_pat_icu["los"] < 0
+]
+
+print("Negative LOS:", len(negative_los))
+
+#age was not relevant cause MIMIC intentionally shifts dates for privacy, so deriving age this way is unreliable,
+# therefore this check is intentionally omitted.
+"""
+adm_pat_icu["age"] = (
+    adm_pat_icu["admittime"].dt.year
+    - adm_pat_icu["dob"].dt.year
+)"""
+#end of issue 4 fix
+
+#######
+# Issue 2, Issue 8: Feature Selection, Target Leakage
+# AUDIT FIX:
+# Remove identifier variables and leakage features that reveal information unavailble during prediction time
+#######
+leakage_columns = [
+    "dod",
+    "dod_hosp",
+    "dod_ssn",
+    "deathtime",
+    "dischtime",
+    "outtime",
+    "discharge_location"
+]
+
+id_columns = [
+    "subject_id",
+    "hadm_id",
+    "icustay_id",
+    "row_id_x",
+    "row_id_y",
+    "row_id"
+]
+
+columns_to_drop = [
+    col
+    for col in leakage_columns + id_columns
+    if col not in adm_pat_icu.columns
+]
+
+adm_pat_icu.drop(columns_to_drop, inplace=True)
+
+#Split the raw data before preprocessing to prevent data leakage.
+X = adm_pat_icu.drop(columns=["hospital_expire_flag"])
+y = adm_pat_icu["hospital_expire_flag"]
+
+""" 
+#this section will be moved below train_test_split
 # Calculate missing value rates
 missing_rate = adm_pat_icu.isnull().mean().sort_values(ascending=False)
 
@@ -164,11 +252,145 @@ from sklearn.model_selection import train_test_split
 # Assume adm_pat_icu_encoded is your preprocessed DataFrame
 X = adm_pat_icu_encoded.drop(columns=['hospital_expire_flag'])
 y = adm_pat_icu_encoded['hospital_expire_flag']
+"""
+from sklearn.model_selection import train_test_split
+
+######
+# Issue 1:  Data Preprocessing
+# AUDIT FIX: Split data before preprocessing to prevent data leakage.
+#####
 
 # Stratified split to maintain class distribution
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42, stratify=y
 )
+
+# Calculate missing value rates using the training data only.
+####
+#
+# AUDIT FIX: Determine missing value rate using only the training data. This ensures that the information from the test set does not influence the preprocessing decisions.
+# TODO: fill in with details, map to oudit
+
+missing_rate = X_train.isnull().mean().sort_values(ascending=False)
+
+# Drop columns with more than 50% missing data
+threshold = 0.5
+cols_to_drop = missing_rate[missing_rate > threshold].index.tolist()
+
+#identify columns with more than 50% missing data and apply the same column removal to both datasets to ensure consistency
+#this line below, that was provided in original codebase, is no longer valid as the decision of the model should be learned from X_train.
+# Therefore it is commented out.
+#adm_pat_icu_clean = adm_pat_icu.drop(columns=cols_to_drop)
+
+X_train = X_train.drop(columns=cols_to_drop)
+X_test = X_test.drop(columns=cols_to_drop)
+
+# Fill missing values in categorical variables with 'Unknown'
+for col in X_train.select_dtypes(include='object').columns:
+    X_train[col] = X_train[col].fillna('Unknown')
+
+# Fill missing values in numeric variables with median
+######
+# AUDIT FIX: Data Leakage
+# Learn median values from the training data only and use the same statistics to impute both datasets,
+# preventing data leakage.
+for col in X_train.select_dtypes(include='number').columns:
+    median = X_train[col].median()
+    X_train[col] = X_train[col].fillna(median)
+    X_test[col] = X_test[col].fillna(median)
+    #if X_train[col].isnull().sum() > 0: #this was no longer valid because
+    #    adm_pat_icu_clean[col] = adm_pat_icu_clean[col].fillna(adm_pat_icu_clean[col].median())
+
+# Cap LOS at 99th percentile to handle extreme outliers
+######
+# AUDIT FIX: Data Leakage
+# Learn the clipping threshold from the training data only and then apply the same threshold to the test data to avoid leakage.
+los_cap = X_train['los'].quantile(0.99)
+X_train['los'] = X_train['los'].clip(upper=los_cap)
+X_test['los'] = X_test['los'].clip(upper=los_cap)
+
+# List of categorical columns (excluding the target)
+#categorical_cols = [col for col in adm_pat_icu_clean.select_dtypes(include='object').columns if col != 'hospital_expire_flag']
+
+#AUDIT FIX: The target variable (hospital_expire_flag) has already been separated from the feature matrix.
+# Therefore, if condition (if col != 'hospital_expire_flag') from original implementation is no longer necessary
+categorical_cols = X_train.select_dtypes(include='object').columns.tolist()
+# Apply one-hot encoding
+#adm_pat_icu_encoded = pd.get_dummies(adm_pat_icu_clean, columns=categorical_cols, drop_first=True)
+
+########
+# AUDIT FIX:
+# Perform one-hot encoding separately on the training
+# and test data
+
+X_train = pd.get_dummies(
+    X_train,
+    columns=categorical_cols,
+    drop_first=True
+)
+
+X_test = pd.get_dummies(
+    X_test,
+    columns=categorical_cols,
+    drop_first=True
+)
+
+#AUDIT FIX: Aligning encoded feature matrices ensures the training and test sets contain exactly the same features after one-hot encoding
+X_train, X_test = X_train.align(
+    X_test,
+    join="left",
+    axis=1,
+    fill_value=0
+)
+
+from sklearn.preprocessing import StandardScaler
+
+# AUDIT FIX: num_cols becomes obsolete as we removed identifier columns before splitting
+# Select numeric columns (excluding target and IDs)
+"""
+num_cols = [col for col in adm_pat_icu_encoded.columns
+            if adm_pat_icu_encoded[col].dtype != 'object'
+            and col not in ['hospital_expire_flag', 'subject_id', 'hadm_id', 'icustay_id', 'row_id_x', 'row_id_y', 'row_id']]
+"""
+#AUDIT FIX: Identifier columns were removed earlier and are therefore excluded.
+num_cols = X_train.select_dtypes(include='number').columns.tolist()
+
+######
+# AUDIT FIX:
+# Learn scaling parameters from the training data only
+# and apply the same transformation to the test data.
+scaler = StandardScaler()
+scaler.fit(X_train[num_cols])
+X_train[num_cols] = scaler.transform(X_train[num_cols])
+X_test[num_cols] = scaler.transform(X_test[num_cols])
+
+#the line below is also obsolete
+#adm_pat_icu_encoded[num_cols] = scaler.fit_transform(adm_pat_icu_encoded[num_cols])
+
+# Remove features with zero variance or that are duplicates
+nunique = X_train.nunique()
+zero_var_cols = nunique[nunique <= 1].index.tolist()
+X_train = X_train.drop(columns=zero_var_cols)
+X_test= X_test.drop(columns=zero_var_cols)
+
+#AUDIT FIX: no longer valid as we have already created x and y before the split on line 192 and 193
+#X  = adm_pat_icu_encoded.drop(columns=['hospital_expire_flag'])
+#y = adm_pat_icu_encoded['hospital_expire_flag']
+
+#####
+#Model Development
+#
+
+#AUDIT FIX: From now on, model should use Train set for learning and evaluate on test set without data leakage.
+# At this stage the dataset has been:
+# - validated for data quality
+# - stripped of leakage and identifier variables
+# - split into training and testing sets
+# - preprocessed using statistics learned only from the
+#   training data to avoid data leakage.
+#
+# The processed training data are now used for
+# hyperparameter tuning and model training.
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
@@ -207,7 +429,7 @@ grid_xgb = GridSearchCV(xgb_clf, param_grid_xgb, cv=5, scoring='roc_auc')
 grid_xgb.fit(X_train, y_train)
 
 print("Best parameters (XGBoost):", grid_xgb.best_params_)
-xgb_best = grid_xgb.best_estimator_
+xgb_best = grid_xgb.best_estimator_ #L: returns the model trained with best hyperparameters
 
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, ConfusionMatrixDisplay, roc_curve
 
