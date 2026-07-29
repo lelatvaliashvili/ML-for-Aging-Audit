@@ -1,4 +1,5 @@
 import pandas as pd
+import config
 
 # Read core tables
 patients = pd.read_csv('mimic_demo/PATIENTS.csv')
@@ -172,6 +173,20 @@ adm_pat_icu["age"] = (
 # AUDIT FIX:
 # Remove identifier variables and leakage features that reveal information unavailble during prediction time
 #######
+
+#remove the columns needed for domain validation only or convert them back to strings
+validation_only_columns = [
+    "admittime",
+    "intime",
+    "dob"
+]
+
+#adm_pat_icu = adm_pat_icu.drop(columns=validation_only_columns)
+
+adm_pat_icu["admittime"] = adm_pat_icu["admittime"].astype(str)
+adm_pat_icu["intime"] = adm_pat_icu["intime"].astype(str)
+adm_pat_icu["dob"] = adm_pat_icu["dob"].astype(str)
+
 leakage_columns = [
     "dod",
     "dod_hosp",
@@ -191,13 +206,14 @@ id_columns = [
     "row_id"
 ]
 
+#Issue 10: Remove identifier columns
 columns_to_drop = [
     col
     for col in leakage_columns + id_columns
-    if col not in adm_pat_icu.columns
+    if col in adm_pat_icu.columns
 ]
 
-adm_pat_icu.drop(columns_to_drop, inplace=True)
+adm_pat_icu.drop(columns = columns_to_drop, inplace=True)
 
 #Split the raw data before preprocessing to prevent data leakage.
 X = adm_pat_icu.drop(columns=["hospital_expire_flag"])
@@ -262,7 +278,7 @@ from sklearn.model_selection import train_test_split
 
 # Stratified split to maintain class distribution
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
+    X, y, test_size=config.TEST_SIZE, random_state=42, stratify=y
 )
 
 # Calculate missing value rates using the training data only.
@@ -274,7 +290,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 missing_rate = X_train.isnull().mean().sort_values(ascending=False)
 
 # Drop columns with more than 50% missing data
-threshold = 0.5
+threshold = config.MISSING_VALUE_THRESHOLD
 cols_to_drop = missing_rate[missing_rate > threshold].index.tolist()
 
 #identify columns with more than 50% missing data and apply the same column removal to both datasets to ensure consistency
@@ -288,6 +304,7 @@ X_test = X_test.drop(columns=cols_to_drop)
 # Fill missing values in categorical variables with 'Unknown'
 for col in X_train.select_dtypes(include='object').columns:
     X_train[col] = X_train[col].fillna('Unknown')
+    X_test[col] = X_test[col].fillna("Unknown")
 
 # Fill missing values in numeric variables with median
 ######
@@ -305,7 +322,7 @@ for col in X_train.select_dtypes(include='number').columns:
 ######
 # AUDIT FIX: Data Leakage
 # Learn the clipping threshold from the training data only and then apply the same threshold to the test data to avoid leakage.
-los_cap = X_train['los'].quantile(0.99)
+los_cap = X_train['los'].quantile(config.LOS_CLIP_QUANTILE)
 X_train['los'] = X_train['los'].clip(upper=los_cap)
 X_test['los'] = X_test['los'].clip(upper=los_cap)
 
@@ -396,9 +413,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
 
 # Set up grid search for Logistic Regression
-logreg = LogisticRegression(max_iter=5000, random_state=42)
-param_grid_lr = {'C': [0.01, 0.1, 1, 10, 100]}
-grid_lr = GridSearchCV(logreg, param_grid_lr, cv=5, scoring='roc_auc')
+logreg = LogisticRegression(max_iter=config.LOGREG_MAX_ITER, random_state=42)
+param_grid_lr = {'C': config.LR_C_VALUES }
+grid_lr = GridSearchCV(logreg, param_grid_lr, cv=config.CV_FOLDS, scoring='roc_auc')
 grid_lr.fit(X_train, y_train)
 
 print("Best parameters (Logistic Regression):", grid_lr.best_params_)
@@ -409,10 +426,10 @@ from sklearn.ensemble import RandomForestClassifier
 # Set up grid search for Random Forest
 rf = RandomForestClassifier(random_state=42)
 param_grid_rf = {
-    'n_estimators': [50, 100, 200],
-    'max_depth': [None, 5, 10]
+    'n_estimators': config.RF_N_ESTIMATORS,
+    'max_depth': config.RF_MAX_DEPTH
 }
-grid_rf = GridSearchCV(rf, param_grid_rf, cv=5, scoring='roc_auc')
+grid_rf = GridSearchCV(rf, param_grid_rf, cv=config.CV_FOLDS, scoring='roc_auc')
 grid_rf.fit(X_train, y_train)
 
 print("Best parameters (Random Forest):", grid_rf.best_params_)
@@ -422,14 +439,14 @@ import xgboost as xgb
 
 xgb_clf = xgb.XGBClassifier(random_state=42, eval_metric='logloss')
 param_grid_xgb = {
-    'n_estimators': [50, 100, 200],
-    'max_depth': [3, 5, 7]
+    'n_estimators': config.XGB_N_ESTIMATORS,
+    'max_depth': config.XGB_MAX_DEPTH
 }
-grid_xgb = GridSearchCV(xgb_clf, param_grid_xgb, cv=5, scoring='roc_auc')
+grid_xgb = GridSearchCV(xgb_clf, param_grid_xgb, cv=config.CV_FOLDS, scoring='roc_auc')
 grid_xgb.fit(X_train, y_train)
 
 print("Best parameters (XGBoost):", grid_xgb.best_params_)
-xgb_best = grid_xgb.best_estimator_ #L: returns the model trained with best hyperparameters
+xgb_best = grid_xgb.best_estimator_
 
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, ConfusionMatrixDisplay, roc_curve
 
@@ -442,8 +459,10 @@ models = {
 results = {}
 
 for name, model in models.items():
+    print(f"Evaluating {name}...")
     y_pred = model.predict(X_test)
     y_proba = model.predict_proba(X_test)[:,1]
+    print("Probabilities done. Metrics:")
     results[name] = {
         'accuracy': accuracy_score(y_test, y_pred),
         'precision': precision_score(y_test, y_pred),
@@ -459,7 +478,7 @@ for name, model in models.items():
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
     disp.plot()
     plt.title(f'Confusion Matrix: {name}')
-    plt.show()
+    plt.show(block=False)
 
     # ROC curve
     fpr, tpr, thresholds = roc_curve(y_test, y_proba)
