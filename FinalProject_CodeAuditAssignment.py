@@ -169,7 +169,7 @@ adm_pat_icu["age"] = (
 #end of issue 4 fix
 
 #######
-# Issue 2, Issue 8: Feature Selection, Target Leakage
+# Issue 2, Issue 8, Issue 10: Feature Selection, Target Leakage, Identifier Variables
 # AUDIT FIX:
 # Remove identifier variables and leakage features that reveal information unavailble during prediction time
 #######
@@ -206,7 +206,7 @@ id_columns = [
     "row_id"
 ]
 
-#Issue 10: Remove identifier columns
+
 columns_to_drop = [
     col
     for col in leakage_columns + id_columns
@@ -219,84 +219,33 @@ adm_pat_icu.drop(columns = columns_to_drop, inplace=True)
 X = adm_pat_icu.drop(columns=["hospital_expire_flag"])
 y = adm_pat_icu["hospital_expire_flag"]
 
-""" 
-#this section will be moved below train_test_split
-# Calculate missing value rates
-missing_rate = adm_pat_icu.isnull().mean().sort_values(ascending=False)
-
-# Drop columns with more than 50% missing data
-threshold = 0.5
-cols_to_drop = missing_rate[missing_rate > threshold].index.tolist()
-adm_pat_icu_clean = adm_pat_icu.drop(columns=cols_to_drop)
-
-# Fill missing values in categorical variables with 'Unknown'
-for col in adm_pat_icu_clean.select_dtypes(include='object').columns:
-    adm_pat_icu_clean[col] = adm_pat_icu_clean[col].fillna('Unknown')
-
-# Fill missing values in numeric variables with median
-for col in adm_pat_icu_clean.select_dtypes(include='number').columns:
-    if adm_pat_icu_clean[col].isnull().sum() > 0:
-        adm_pat_icu_clean[col] = adm_pat_icu_clean[col].fillna(adm_pat_icu_clean[col].median())
-
-# Cap LOS at 99th percentile to handle extreme outliers
-los_cap = adm_pat_icu_clean['los'].quantile(0.99)
-adm_pat_icu_clean['los'] = adm_pat_icu_clean['los'].clip(upper=los_cap)
-
-# List of categorical columns (excluding the target)
-categorical_cols = [col for col in adm_pat_icu_clean.select_dtypes(include='object').columns if col != 'hospital_expire_flag']
-
-# Apply one-hot encoding
-adm_pat_icu_encoded = pd.get_dummies(adm_pat_icu_clean, columns=categorical_cols, drop_first=True)
-
-from sklearn.preprocessing import StandardScaler
-
-# Select numeric columns (excluding target and IDs)
-num_cols = [col for col in adm_pat_icu_encoded.columns 
-            if adm_pat_icu_encoded[col].dtype != 'object' 
-            and col not in ['hospital_expire_flag', 'subject_id', 'hadm_id', 'icustay_id', 'row_id_x', 'row_id_y', 'row_id']]
-
-scaler = StandardScaler()
-adm_pat_icu_encoded[num_cols] = scaler.fit_transform(adm_pat_icu_encoded[num_cols])
-
-# Remove features with zero variance or that are duplicates
-nunique = adm_pat_icu_encoded.nunique()
-zero_var_cols = nunique[nunique <= 1].index.tolist()
-adm_pat_icu_encoded = adm_pat_icu_encoded.drop(columns=zero_var_cols)
-
-from sklearn.model_selection import train_test_split
-
-# Assume adm_pat_icu_encoded is your preprocessed DataFrame
-X = adm_pat_icu_encoded.drop(columns=['hospital_expire_flag'])
-y = adm_pat_icu_encoded['hospital_expire_flag']
-"""
 from sklearn.model_selection import train_test_split
 
 ######
 # Issue 1:  Data Preprocessing
 # AUDIT FIX: Split data before preprocessing to prevent data leakage.
 #####
-
 # Stratified split to maintain class distribution
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=config.TEST_SIZE, random_state=42, stratify=y
 )
 
-# Calculate missing value rates using the training data only.
-####
-#
+########
+# Issue 8: Missing Value Handling
 # AUDIT FIX: Determine missing value rate using only the training data. This ensures that the information from the test set does not influence the preprocessing decisions.
-# TODO: fill in with details, map to oudit
+# Missingness pattern is inspected before imputation, variables such as emergency department timestamps (edregtime, edouttime) are likely related to observed clinical characteristics, while language, religion, etc are more likely missing at random.
+# Features with more than 50% missing observations are removed to avoid relying on majority class. The same columns are then excluded from both the training and test sets for feature consistency.
+########
 
 missing_rate = X_train.isnull().mean().sort_values(ascending=False)
+
+#AUDIT FIX: inspect missing values to make informed decision about dropping
+print("missing value percentage: ")
+print((missing_rate * 100).round(1))
 
 # Drop columns with more than 50% missing data
 threshold = config.MISSING_VALUE_THRESHOLD
 cols_to_drop = missing_rate[missing_rate > threshold].index.tolist()
-
-#identify columns with more than 50% missing data and apply the same column removal to both datasets to ensure consistency
-#this line below, that was provided in original codebase, is no longer valid as the decision of the model should be learned from X_train.
-# Therefore it is commented out.
-#adm_pat_icu_clean = adm_pat_icu.drop(columns=cols_to_drop)
 
 X_train = X_train.drop(columns=cols_to_drop)
 X_test = X_test.drop(columns=cols_to_drop)
@@ -315,16 +264,53 @@ for col in X_train.select_dtypes(include='number').columns:
     median = X_train[col].median()
     X_train[col] = X_train[col].fillna(median)
     X_test[col] = X_test[col].fillna(median)
-    #if X_train[col].isnull().sum() > 0: #this was no longer valid because
-    #    adm_pat_icu_clean[col] = adm_pat_icu_clean[col].fillna(adm_pat_icu_clean[col].median())
+
 
 # Cap LOS at 99th percentile to handle extreme outliers
 ######
 # AUDIT FIX: Data Leakage
-# Learn the clipping threshold from the training data only and then apply the same threshold to the test data to avoid leakage.
-los_cap = X_train['los'].quantile(config.LOS_CLIP_QUANTILE)
-X_train['los'] = X_train['los'].clip(upper=los_cap)
-X_test['los'] = X_test['los'].clip(upper=los_cap)
+# Learn the clipping threshold from the training data only and then apply the same threshold to the test data to avoid leakage.#
+
+#inspect distribution
+
+print(X_train["los"].describe())
+
+#how many observations would be clipped
+upper = X_train["los"].quantile(0.99)
+n_outliers = (X_train["los"] > upper).sum()
+
+#check for extreme values
+plt.figure(figsize=(6,4))
+plt.boxplot(X_train["los"], vert=False)
+plt.xlabel("Length of Stay (days)")
+plt.title("LOS Distribution Before Clipping")
+plt.show()
+
+print(f"99th percentile: {upper:.2f}")
+print(f"Number of values above threshold: {n_outliers}")
+
+#IQR rule
+Q1 = X_train["los"].quantile(0.25)
+Q3 = X_train["los"].quantile(0.75)
+
+IQR = Q3 - Q1
+
+lower = Q1 - 1.5 * IQR
+upper = Q3 + 1.5 * IQR
+
+print(f"Upper bound: {upper:.2f}")
+
+print("Outliers detected with IQR:",
+      (X_train["los"] > upper).sum())
+
+X_train["los"] = X_train["los"].clip(lower=lower, upper=upper)
+X_test["los"] = X_test["los"].clip(lower=lower, upper=upper)
+
+
+#los_cap = X_train['los'].quantile(config.LOS_CLIP_QUANTILE)
+#X_train['los'] = X_train['los'].clip(upper=los_cap)
+#X_test['los'] = X_test['los'].clip(upper=los_cap)
+
 
 # List of categorical columns (excluding the target)
 #categorical_cols = [col for col in adm_pat_icu_clean.select_dtypes(include='object').columns if col != 'hospital_expire_flag']
@@ -390,22 +376,17 @@ zero_var_cols = nunique[nunique <= 1].index.tolist()
 X_train = X_train.drop(columns=zero_var_cols)
 X_test= X_test.drop(columns=zero_var_cols)
 
-#AUDIT FIX: no longer valid as we have already created x and y before the split on line 192 and 193
-#X  = adm_pat_icu_encoded.drop(columns=['hospital_expire_flag'])
-#y = adm_pat_icu_encoded['hospital_expire_flag']
 
 #####
 #Model Development
 #
-
-#AUDIT FIX: From now on, model should use Train set for learning and evaluate on test set without data leakage.
+#AUDIT FIX overview:
 # At this stage the dataset has been:
 # - validated for data quality
 # - stripped of leakage and identifier variables
 # - split into training and testing sets
 # - preprocessed using statistics learned only from the
 #   training data to avoid data leakage.
-#
 # The processed training data are now used for
 # hyperparameter tuning and model training.
 

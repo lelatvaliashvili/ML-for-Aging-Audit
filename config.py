@@ -1,5 +1,3 @@
-# config.py
-
 #####
 #AUDIT FIX
 #Issue 11: To improve readability and maintainability,  hard-coded numerical constants were replaced with named configuration parameters provided in this file
