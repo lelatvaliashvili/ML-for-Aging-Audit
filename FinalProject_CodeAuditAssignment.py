@@ -268,15 +268,17 @@ for col in X_train.select_dtypes(include='number').columns:
 
 # Cap LOS at 99th percentile to handle extreme outliers
 ######
-# AUDIT FIX: Data Leakage
+# AUDIT FIX: Issue 5: Outlier Analysis
 # Learn the clipping threshold from the training data only and then apply the same threshold to the test data to avoid leakage.#
-
+# Decision and Justification: Inspecting outliers with IQR rule and comparing it with existing 0.99th percentile clipping
+# demonstrated that 14 patients (10% of the dataset) are marked as outliers with IQR, most of whom are critically ill patients with long stays, not
+# as a result of data errors. As the 99th percentile only clips 2 extreme samples, it ensures that most of the values are saved for training. Therefore, IQR is computed
+# solely for exploration purposes, and clipping using the 99th percentile is what is being used in the pipeline.
 #inspect distribution
-
 print(X_train["los"].describe())
 
-#how many observations would be clipped
-upper = X_train["los"].quantile(0.99)
+#check how many observations would be clipped
+upper = X_train["los"].quantile(config.LOS_CLIP_QUANTILE)
 n_outliers = (X_train["los"] > upper).sum()
 
 #check for extreme values
@@ -295,21 +297,21 @@ Q3 = X_train["los"].quantile(0.75)
 
 IQR = Q3 - Q1
 
-lower = Q1 - 1.5 * IQR
-upper = Q3 + 1.5 * IQR
+lower = Q1 - config.IQR_MULTIPLIER * IQR
+upper = Q3 + config.IQR_MULTIPLIER * IQR
 
 print(f"Upper bound: {upper:.2f}")
 
 print("Outliers detected with IQR:",
       (X_train["los"] > upper).sum())
 
-X_train["los"] = X_train["los"].clip(lower=lower, upper=upper)
-X_test["los"] = X_test["los"].clip(lower=lower, upper=upper)
+los_cap = X_train["los"].clip(config.LOS_CLIP_QUANTILE)
+n_clipped = (X_train["los"] > los_cap).sum()
 
+print(f"Number of training values above threshold: {n_clipped}")
 
-#los_cap = X_train['los'].quantile(config.LOS_CLIP_QUANTILE)
-#X_train['los'] = X_train['los'].clip(upper=los_cap)
-#X_test['los'] = X_test['los'].clip(upper=los_cap)
+X_train['los'] = X_train['los'].clip(upper=los_cap)
+X_test['los'] = X_test['los'].clip(upper=los_cap)
 
 
 # List of categorical columns (excluding the target)
@@ -317,7 +319,9 @@ X_test["los"] = X_test["los"].clip(lower=lower, upper=upper)
 
 #AUDIT FIX: The target variable (hospital_expire_flag) has already been separated from the feature matrix.
 # Therefore, if condition (if col != 'hospital_expire_flag') from original implementation is no longer necessary
+
 categorical_cols = X_train.select_dtypes(include='object').columns.tolist()
+
 # Apply one-hot encoding
 #adm_pat_icu_encoded = pd.get_dummies(adm_pat_icu_clean, columns=categorical_cols, drop_first=True)
 
