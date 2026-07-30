@@ -16,13 +16,13 @@ print(admissions.head())
 print("\nICUSTAYS.csv shape:", icustays.shape)
 print(icustays.head())
 
-# Merge patients and admissions on 'subject_id'
+#Merge patients and admissions on 'subject_id'
 adm_pat = pd.merge(admissions, patients, on='subject_id', how='left')
 
-# Merge the result with icustays on ['subject_id', 'hadm_id']
+#Merge the result with icustays on ['subject_id', 'hadm_id']
 adm_pat_icu = pd.merge(adm_pat, icustays, on=['subject_id', 'hadm_id'], how='left')
 
-# Check the shape and sample rows of the merged table
+#Check the shape and sample rows of the merged table
 print("Merged table shape:", adm_pat_icu.shape)
 print(adm_pat_icu.head())
 
@@ -120,18 +120,19 @@ plt.ylabel('Death Rate')
 plt.show()
 
 
-
 #######
-# Domain Validation (Issue #4 form the audit report)
-# Audit Fix: Add validation of the dataset beofre preprocessing by checking temporal consistency
-# and clinically meaningful constraints. This follows the EDA process discussed in the lecture.
+# Issue 4: Domain Validation
+# Audit Fix:
+# Add validation of the dataset before preprocessing by checking temporal consistency
+# and clinically meaningful constraints such as admission before discharge, ICU admission before ICU discharge, non-negative LOS values.
 # Therefore, EDA is followed by validation before cleaning
+# Age was not relevant as MIMIC intentionally shifts dates for privacy, so deriving age this way is unreliable,
+# therefore ensuring plausible age range is intentionally omitted even though initial audit report included checking realistic age.
 #######
 
 date_columns= [
-    'admittime', 'dischtime',
-    'intime', 'outtime',
-    'dob', 'dod', 'deathtime'
+    'admittime', 'dischtime', 'intime',
+    'outtime', 'dob', 'dod', 'deathtime'
 ]
 
 for col in date_columns:
@@ -145,12 +146,21 @@ invalid_admissions = adm_pat_icu[
 
 print("number of invalid dates for admission and discharge: Admissions after discharge:", len(invalid_admissions))
 
+#Ensure only valid records remain
+adm_pat_icu = adm_pat_icu[
+    adm_pat_icu["admittime"] <= adm_pat_icu["dischtime"]
+]
+
 # Check that for all entries, ICU admission is before ICU discharge
 invalid_icu = adm_pat_icu[
     adm_pat_icu["intime"] > adm_pat_icu["outtime"]
 ]
 
 print("ICU discharge before ICU admission:", len(invalid_icu))
+
+#Ensure only valid records remain
+adm_pat_icu = adm_pat_icu[
+    adm_pat_icu["intime"] <= adm_pat_icu["outtime"]]
 
 # Check for Negative length of stay
 negative_los = adm_pat_icu[
@@ -159,33 +169,38 @@ negative_los = adm_pat_icu[
 
 print("Negative LOS:", len(negative_los))
 
-#age was not relevant cause MIMIC intentionally shifts dates for privacy, so deriving age this way is unreliable,
-# therefore this check is intentionally omitted.
-"""
-adm_pat_icu["age"] = (
-    adm_pat_icu["admittime"].dt.year
-    - adm_pat_icu["dob"].dt.year
-)"""
-#end of issue 4 fix
+#Ensure only valid records remain
+adm_pat_icu = adm_pat_icu[
+    adm_pat_icu["los"] >= 0
+]
 
-#######
-# Issue 2, Issue 8, Issue 10: Feature Selection, Target Leakage, Identifier Variables
-# AUDIT FIX:
-# Remove identifier variables and leakage features that reveal information unavailble during prediction time
+########
+# The current dataset does not contain records that violate these constraints, but this step ensures
+# that logically inconsistent observations are excluded if they are encountered in future datasets.
 #######
 
-#remove the columns needed for domain validation only or convert them back to strings
-validation_only_columns = [
+#######
+# Audit Fix:
+# Issue 2, Issue 9: Target Leakage, Feature Selection, Identifier Variables
+# Remove variables that would not be available at prediction time
+# (target leakage) together with identifier attributes that uniquely
+# identify patients or admissions but do not contain predictive
+# clinical information.
+#######
+
+#remove the columns used for domain validation only or convert them back to strings
+validation_columns = [
     "admittime",
     "intime",
     "dob"
 ]
 
-#adm_pat_icu = adm_pat_icu.drop(columns=validation_only_columns)
+adm_pat_icu = adm_pat_icu.drop(columns=validation_columns)
 
-adm_pat_icu["admittime"] = adm_pat_icu["admittime"].astype(str)
-adm_pat_icu["intime"] = adm_pat_icu["intime"].astype(str)
-adm_pat_icu["dob"] = adm_pat_icu["dob"].astype(str)
+#TODO: should we remove these or engineer useful features (month, weekday, hour, age...)
+#adm_pat_icu["admittime"] = adm_pat_icu["admittime"].astype(str)
+#adm_pat_icu["intime"] = adm_pat_icu["intime"].astype(str)
+#adm_pat_icu["dob"] = adm_pat_icu["dob"].astype(str)
 
 leakage_columns = [
     "dod",
@@ -206,7 +221,6 @@ id_columns = [
     "row_id"
 ]
 
-
 columns_to_drop = [
     col
     for col in leakage_columns + id_columns
@@ -221,25 +235,29 @@ y = adm_pat_icu["hospital_expire_flag"]
 
 from sklearn.model_selection import train_test_split
 
-######
-# Issue 1:  Data Preprocessing
-# AUDIT FIX: Split data before preprocessing to prevent data leakage.
-#####
+########
+# Issue 1:  Data Preprocessing Before Train/Test split
+# Audit Fix:
+# Split dataset into training and test sets before preprocessing.
+# All preprocessing (Missing-value statistics, outlier thresholds, scaling parameters) is fitted using
+# the training data and then applied to test set to prevent data leakage.
+########
+
 # Stratified split to maintain class distribution
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=config.TEST_SIZE, random_state=42, stratify=y
 )
 
 ########
-# Issue 8: Missing Value Handling
-# AUDIT FIX: Determine missing value rate using only the training data. This ensures that the information from the test set does not influence the preprocessing decisions.
-# Missingness pattern is inspected before imputation, variables such as emergency department timestamps (edregtime, edouttime) are likely related to observed clinical characteristics, while language, religion, etc are more likely missing at random.
+# Issue 6: Missing Value Handling
+# Audit Fix:
+# Determine missing value rate using only the training data. This ensures that the information from the test set does not influence the preprocessing decisions.
+# Missingness pattern is inspected before imputation, variables such as emergency department timestamps (edregtime, edouttime) are likely related to observed clinical characteristics, while language, religion, etc. are more likely missing at random.
 # Features with more than 50% missing observations are removed to avoid relying on majority class. The same columns are then excluded from both the training and test sets for feature consistency.
 ########
 
 missing_rate = X_train.isnull().mean().sort_values(ascending=False)
 
-#AUDIT FIX: inspect missing values to make informed decision about dropping
 print("missing value percentage: ")
 print((missing_rate * 100).round(1))
 
@@ -255,11 +273,14 @@ for col in X_train.select_dtypes(include='object').columns:
     X_train[col] = X_train[col].fillna('Unknown')
     X_test[col] = X_test[col].fillna("Unknown")
 
+########
 # Fill missing values in numeric variables with median
-######
-# AUDIT FIX: Data Leakage
+# Issue 6: Missing Value Handling
+# Audit Fix:
 # Learn median values from the training data only and use the same statistics to impute both datasets,
 # preventing data leakage.
+########
+
 for col in X_train.select_dtypes(include='number').columns:
     median = X_train[col].median()
     X_train[col] = X_train[col].fillna(median)
@@ -267,14 +288,18 @@ for col in X_train.select_dtypes(include='number').columns:
 
 
 # Cap LOS at 99th percentile to handle extreme outliers
-######
-# AUDIT FIX: Issue 5: Outlier Analysis
-# Learn the clipping threshold from the training data only and then apply the same threshold to the test data to avoid leakage.#
-# Decision and Justification: Inspecting outliers with IQR rule and comparing it with existing 0.99th percentile clipping
-# demonstrated that 14 patients (10% of the dataset) are marked as outliers with IQR, most of whom are critically ill patients with long stays, not
-# as a result of data errors. As the 99th percentile only clips 2 extreme samples, it ensures that most of the values are saved for training. Therefore, IQR is computed
-# solely for exploration purposes, and clipping using the 99th percentile is what is being used in the pipeline.
-#inspect distribution
+#######
+# Audit Fix:
+# Issue 5: Outlier Analysis
+# The updated code learns the clipping threshold from the training data only and then applies the same threshold to the test data to avoid leakage.
+# Inspecting outliers with IQR rule and comparing it with existing 0.99th percentile clipping
+# demonstrated that 14 patients (10% of the dataset) get marked as outliers with IQR, most of whom are critically ill patients with long stays,
+# As the 99th percentile only clips 2 extreme samples, it ensures that most of the values are saved for training set. Therefore, IQR is computed
+# solely for exploration purposes, and clipping using the 99th percentile is what is being retained in the pipeline, even though the initial audit identified it as
+# a flaw that needed to be addressed.
+#######
+
+# inspect distribution
 print(X_train["los"].describe())
 
 #check how many observations would be clipped
@@ -297,38 +322,31 @@ Q3 = X_train["los"].quantile(0.75)
 
 IQR = Q3 - Q1
 
-lower = Q1 - config.IQR_MULTIPLIER * IQR
-upper = Q3 + config.IQR_MULTIPLIER * IQR
+iqr_lower = Q1 - config.IQR_MULTIPLIER * IQR
+iqr_upper = Q3 + config.IQR_MULTIPLIER * IQR
 
-print(f"Upper bound: {upper:.2f}")
+print(f"IQR Upper bound: {iqr_upper:.2f}")
 
 print("Outliers detected with IQR:",
-      (X_train["los"] > upper).sum())
+      (X_train["los"] > iqr_upper).sum())
 
-los_cap = X_train["los"].clip(config.LOS_CLIP_QUANTILE)
-n_clipped = (X_train["los"] > los_cap).sum()
+X_train['los'] = X_train['los'].clip(upper=upper)
+X_test['los'] = X_test['los'].clip(upper=upper)
 
-print(f"Number of training values above threshold: {n_clipped}")
-
-X_train['los'] = X_train['los'].clip(upper=los_cap)
-X_test['los'] = X_test['los'].clip(upper=los_cap)
-
-
+########
 # List of categorical columns (excluding the target)
-#categorical_cols = [col for col in adm_pat_icu_clean.select_dtypes(include='object').columns if col != 'hospital_expire_flag']
-
-#AUDIT FIX: The target variable (hospital_expire_flag) has already been separated from the feature matrix.
+# The target variable (hospital_expire_flag) has already been separated from the feature matrix.
 # Therefore, if condition (if col != 'hospital_expire_flag') from original implementation is no longer necessary
+########
 
 categorical_cols = X_train.select_dtypes(include='object').columns.tolist()
 
-# Apply one-hot encoding
-#adm_pat_icu_encoded = pd.get_dummies(adm_pat_icu_clean, columns=categorical_cols, drop_first=True)
-
 ########
-# AUDIT FIX:
-# Perform one-hot encoding separately on the training
-# and test data
+# Issue 1 - Data Preprocessing Before Train/Test Split
+# Audit Fix:
+# Perform one-hot encoding separately on the training and test sets
+# The encoded feature matrices are aligned to ensure both contain the same features after one-hot encoding
+########
 
 X_train = pd.get_dummies(
     X_train,
@@ -342,7 +360,6 @@ X_test = pd.get_dummies(
     drop_first=True
 )
 
-#AUDIT FIX: Aligning encoded feature matrices ensures the training and test sets contain exactly the same features after one-hot encoding
 X_train, X_test = X_train.align(
     X_test,
     join="left",
@@ -352,27 +369,21 @@ X_train, X_test = X_train.align(
 
 from sklearn.preprocessing import StandardScaler
 
-# AUDIT FIX: num_cols becomes obsolete as we removed identifier columns before splitting
-# Select numeric columns (excluding target and IDs)
-"""
-num_cols = [col for col in adm_pat_icu_encoded.columns
-            if adm_pat_icu_encoded[col].dtype != 'object'
-            and col not in ['hospital_expire_flag', 'subject_id', 'hadm_id', 'icustay_id', 'row_id_x', 'row_id_y', 'row_id']]
-"""
-#AUDIT FIX: Identifier columns were removed earlier and are therefore excluded.
+#Audit Fix: Identifier columns were removed as a part of fixing Issue 9, and are therefore excluded.
 num_cols = X_train.select_dtypes(include='number').columns.tolist()
 
-######
-# AUDIT FIX:
+#######
+# Issue 1: Data Preprocessing Before Train/Test Split
+# Audit Fix:
 # Learn scaling parameters from the training data only
 # and apply the same transformation to the test data.
+#######
+
 scaler = StandardScaler()
 scaler.fit(X_train[num_cols])
 X_train[num_cols] = scaler.transform(X_train[num_cols])
 X_test[num_cols] = scaler.transform(X_test[num_cols])
 
-#the line below is also obsolete
-#adm_pat_icu_encoded[num_cols] = scaler.fit_transform(adm_pat_icu_encoded[num_cols])
 
 # Remove features with zero variance or that are duplicates
 nunique = X_train.nunique()
@@ -380,19 +391,15 @@ zero_var_cols = nunique[nunique <= 1].index.tolist()
 X_train = X_train.drop(columns=zero_var_cols)
 X_test= X_test.drop(columns=zero_var_cols)
 
-
-#####
-#Model Development
-#
-#AUDIT FIX overview:
-# At this stage the dataset has been:
+######
+# Audit Fix overview:
+# At this stage, The dataset has been:
 # - validated for data quality
 # - stripped of leakage and identifier variables
 # - split into training and testing sets
-# - preprocessed using statistics learned only from the
-#   training data to avoid data leakage.
-# The processed training data are now used for
-# hyperparameter tuning and model training.
+# - preprocessed using statistics learned only from the training data to avoid data leakage.
+# -  The processed training data are now used for hyperparameter tuning and model training.
+######
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
