@@ -1,5 +1,9 @@
 import pandas as pd
+import numpy as np
 import config
+
+#Issue 9: one global seed so the whole run is reproducible, not just the pieces that already had random_state
+np.random.seed(config.RANDOM_STATE)
 
 # Read core tables
 patients = pd.read_csv('mimic_demo/PATIENTS.csv')
@@ -122,10 +126,9 @@ plt.show()
 
 
 #######
-# Domain Validation (Issue #4 form the audit report)
-# Audit Fix: Add validation of the dataset beofre preprocessing by checking temporal consistency
-# and clinically meaningful constraints. This follows the EDA process discussed in the lecture.
-# Therefore, EDA is followed by validation before cleaning
+# Domain Validation (Issue #4 )
+# Add validation of the dataset beofre preprocessing by checking temporal consistency
+# and clinically meaningful constraints. 
 #######
 
 date_columns= [
@@ -159,6 +162,12 @@ negative_los = adm_pat_icu[
 
 print("Negative LOS:", len(negative_los))
 
+#Issue 4: rows failing these checks are data entry errors, so drop them instead of
+# just printing a count. Currently 0 rows are flagged in this dataset.
+invalid_rows = invalid_admissions.index.union(invalid_icu.index).union(negative_los.index)
+print(f"Dropping {len(invalid_rows)} rows that failed domain validation")
+adm_pat_icu = adm_pat_icu.drop(index=invalid_rows)
+
 #age was not relevant cause MIMIC intentionally shifts dates for privacy, so deriving age this way is unreliable,
 # therefore this check is intentionally omitted.
 """
@@ -166,11 +175,10 @@ adm_pat_icu["age"] = (
     adm_pat_icu["admittime"].dt.year
     - adm_pat_icu["dob"].dt.year
 )"""
-#end of issue 4 fix
+
 
 #######
-# Issue 2, Issue 8, Issue 10: Feature Selection, Target Leakage, Identifier Variables
-# AUDIT FIX:
+# Issue 2, Issue 8: Feature Selection, Target Leakage, Identifier Variables
 # Remove identifier variables and leakage features that reveal information unavailble during prediction time
 #######
 
@@ -198,14 +206,13 @@ leakage_columns = [
 ]
 
 id_columns = [
-    "subject_id",
     "hadm_id",
     "icustay_id",
     "row_id_x",
     "row_id_y",
     "row_id"
 ]
-
+#Issue 3: subject_id stays for now, GroupShuffleSplit needs it; dropped from features after the split.
 
 columns_to_drop = [
     col
@@ -219,27 +226,34 @@ adm_pat_icu.drop(columns = columns_to_drop, inplace=True)
 X = adm_pat_icu.drop(columns=["hospital_expire_flag"])
 y = adm_pat_icu["hospital_expire_flag"]
 
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit
 
 ######
-# Issue 1:  Data Preprocessing
-# AUDIT FIX: Split data before preprocessing to prevent data leakage.
+# Issue 1: Split data before preprocessing to prevent data leakage.
+# Issue 3: split by subject_id, not by row, so a patient can't end up in both sets.
+# Tradeoff: GroupShuffleSplit can't also stratify by y like train_test_split did.
 #####
-# Stratified split to maintain class distribution
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=config.TEST_SIZE, random_state=42, stratify=y
-)
+gss = GroupShuffleSplit(n_splits=1, test_size=config.TEST_SIZE, random_state=config.RANDOM_STATE)
+train_idx, test_idx = next(gss.split(X, y, groups=X["subject_id"]))
+
+#kept for the repeated group CV in the evaluation section further down
+groups_train = X.iloc[train_idx]["subject_id"]
+groups_test = X.iloc[test_idx]["subject_id"]
+
+X_train = X.iloc[train_idx].drop(columns=["subject_id"])
+X_test = X.iloc[test_idx].drop(columns=["subject_id"])
+y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
 
 ########
-# Issue 8: Missing Value Handling
-# AUDIT FIX: Determine missing value rate using only the training data. This ensures that the information from the test set does not influence the preprocessing decisions.
+# Issue 6: Missing Value Handling
+# Determine missing value rate using only the training data. This ensures that the information from the test set does not influence the preprocessing decisions.
 # Missingness pattern is inspected before imputation, variables such as emergency department timestamps (edregtime, edouttime) are likely related to observed clinical characteristics, while language, religion, etc are more likely missing at random.
 # Features with more than 50% missing observations are removed to avoid relying on majority class. The same columns are then excluded from both the training and test sets for feature consistency.
 ########
 
 missing_rate = X_train.isnull().mean().sort_values(ascending=False)
 
-#AUDIT FIX: inspect missing values to make informed decision about dropping
+#inspect missing values to make informed decision about dropping
 print("missing value percentage: ")
 print((missing_rate * 100).round(1))
 
@@ -250,157 +264,111 @@ cols_to_drop = missing_rate[missing_rate > threshold].index.tolist()
 X_train = X_train.drop(columns=cols_to_drop)
 X_test = X_test.drop(columns=cols_to_drop)
 
-# Fill missing values in categorical variables with 'Unknown'
-for col in X_train.select_dtypes(include='object').columns:
-    X_train[col] = X_train[col].fillna('Unknown')
-    X_test[col] = X_test[col].fillna("Unknown")
+#Issue 6: edregtime/edouttime are blank for every ELECTIVE admission (no ED visit),
+# so the missingness itself is signal. Keep it as a flag before the raw columns get dropped below.
+for col in ["edregtime", "edouttime"]:
+    if col in X_train.columns:
+        X_train[f"{col}_missing"] = X_train[col].isna().astype(int)
+        X_test[f"{col}_missing"] = X_test[col].isna().astype(int)
 
-# Fill missing values in numeric variables with median
-######
-# AUDIT FIX: Data Leakage
-# Learn median values from the training data only and use the same statistics to impute both datasets,
-# preventing data leakage.
-for col in X_train.select_dtypes(include='number').columns:
-    median = X_train[col].median()
-    X_train[col] = X_train[col].fillna(median)
-    X_test[col] = X_test[col].fillna(median)
-
-
-# Cap LOS at 99th percentile to handle extreme outliers
-######
-# AUDIT FIX: Issue 5: Outlier Analysis
-# Learn the clipping threshold from the training data only and then apply the same threshold to the test data to avoid leakage.#
-# Decision and Justification: Inspecting outliers with IQR rule and comparing it with existing 0.99th percentile clipping
-# demonstrated that 14 patients (10% of the dataset) are marked as outliers with IQR, most of whom are critically ill patients with long stays, not
-# as a result of data errors. As the 99th percentile only clips 2 extreme samples, it ensures that most of the values are saved for training. Therefore, IQR is computed
-# solely for exploration purposes, and clipping using the 99th percentile is what is being used in the pipeline.
+# Issue 5: Outlier Analysis
+# 99th percentile and IQR disagree on how many los values are "outliers" (2 vs 14),
+# and the values flagged are real, legitimate long stays, not data errors.
+# So instead of clipping either way, log-transform los to shrink their pull.
 #inspect distribution
 print(X_train["los"].describe())
 
-#check how many observations would be clipped
-upper = X_train["los"].quantile(config.LOS_CLIP_QUANTILE)
-n_outliers = (X_train["los"] > upper).sum()
+#99th percentile, for exploration only
+upper_pct = X_train["los"].quantile(config.LOS_CLIP_QUANTILE)
+n_outliers_pct = (X_train["los"] > upper_pct).sum()
 
 #check for extreme values
 plt.figure(figsize=(6,4))
 plt.boxplot(X_train["los"], vert=False)
 plt.xlabel("Length of Stay (days)")
-plt.title("LOS Distribution Before Clipping")
+plt.title("LOS Distribution Before Log Transform")
 plt.show()
 
-print(f"99th percentile: {upper:.2f}")
-print(f"Number of values above threshold: {n_outliers}")
+print(f"99th percentile: {upper_pct:.2f}")
+print(f"Number of values above 99th percentile: {n_outliers_pct}")
 
-#IQR rule
+#IQR rule, for exploration only
 Q1 = X_train["los"].quantile(0.25)
 Q3 = X_train["los"].quantile(0.75)
 
 IQR = Q3 - Q1
 
-lower = Q1 - config.IQR_MULTIPLIER * IQR
-upper = Q3 + config.IQR_MULTIPLIER * IQR
+lower_iqr = Q1 - config.IQR_MULTIPLIER * IQR
+upper_iqr = Q3 + config.IQR_MULTIPLIER * IQR
 
-print(f"Upper bound: {upper:.2f}")
-
+print(f"IQR upper bound: {upper_iqr:.2f}")
 print("Outliers detected with IQR:",
-      (X_train["los"] > upper).sum())
+      (X_train["los"] > upper_iqr).sum())
 
-los_cap = X_train["los"].clip(config.LOS_CLIP_QUANTILE)
-n_clipped = (X_train["los"] > los_cap).sum()
-
-print(f"Number of training values above threshold: {n_clipped}")
-
-X_train['los'] = X_train['los'].clip(upper=los_cap)
-X_test['los'] = X_test['los'].clip(upper=los_cap)
+#log1p has no fitted parameters, so it's safe to apply to both sets directly
+X_train['los'] = np.log1p(X_train['los'])
+X_test['los'] = np.log1p(X_test['los'])
 
 
-# List of categorical columns (excluding the target)
-#categorical_cols = [col for col in adm_pat_icu_clean.select_dtypes(include='object').columns if col != 'hospital_expire_flag']
+#Issue 1: imputer, scaler and encoder now live inside a Pipeline (below) instead of
+# being fit on all of X_train up front, so GridSearchCV refits them per CV fold
 
-#AUDIT FIX: The target variable (hospital_expire_flag) has already been separated from the feature matrix.
-# Therefore, if condition (if col != 'hospital_expire_flag') from original implementation is no longer necessary
-
-categorical_cols = X_train.select_dtypes(include='object').columns.tolist()
-
-# Apply one-hot encoding
-#adm_pat_icu_encoded = pd.get_dummies(adm_pat_icu_clean, columns=categorical_cols, drop_first=True)
-
-########
-# AUDIT FIX:
-# Perform one-hot encoding separately on the training
-# and test data
-
-X_train = pd.get_dummies(
-    X_train,
-    columns=categorical_cols,
-    drop_first=True
-)
-
-X_test = pd.get_dummies(
-    X_test,
-    columns=categorical_cols,
-    drop_first=True
-)
-
-#AUDIT FIX: Aligning encoded feature matrices ensures the training and test sets contain exactly the same features after one-hot encoding
-X_train, X_test = X_train.align(
-    X_test,
-    join="left",
-    axis=1,
-    fill_value=0
-)
-
-from sklearn.preprocessing import StandardScaler
-
-# AUDIT FIX: num_cols becomes obsolete as we removed identifier columns before splitting
-# Select numeric columns (excluding target and IDs)
-"""
-num_cols = [col for col in adm_pat_icu_encoded.columns
-            if adm_pat_icu_encoded[col].dtype != 'object'
-            and col not in ['hospital_expire_flag', 'subject_id', 'hadm_id', 'icustay_id', 'row_id_x', 'row_id_y', 'row_id']]
-"""
-#AUDIT FIX: Identifier columns were removed earlier and are therefore excluded.
+# Identifier columns were removed earlier and are therefore excluded.
 num_cols = X_train.select_dtypes(include='number').columns.tolist()
 
-######
-# AUDIT FIX:
-# Learn scaling parameters from the training data only
-# and apply the same transformation to the test data.
-scaler = StandardScaler()
-scaler.fit(X_train[num_cols])
-X_train[num_cols] = scaler.transform(X_train[num_cols])
-X_test[num_cols] = scaler.transform(X_test[num_cols])
+#skip one-hot encoding for high-cardinality columns (e.g. raw admittime/intime/dob
+# strings) so they don't blow up into hundreds of dummy columns
+categorical_cols_all = X_train.select_dtypes(include='object').columns.tolist()
+high_cardinality_cols = [
+    col for col in categorical_cols_all
+    if X_train[col].nunique() > config.ONE_HOT_MAX_CARDINALITY
+]
+categorical_cols = [col for col in categorical_cols_all if col not in high_cardinality_cols]
 
-#the line below is also obsolete
-#adm_pat_icu_encoded[num_cols] = scaler.fit_transform(adm_pat_icu_encoded[num_cols])
+print("High-cardinality columns excluded from one-hot encoding:", high_cardinality_cols)
 
-# Remove features with zero variance or that are duplicates
-nunique = X_train.nunique()
-zero_var_cols = nunique[nunique <= 1].index.tolist()
-X_train = X_train.drop(columns=zero_var_cols)
-X_test= X_test.drop(columns=zero_var_cols)
+X_train = X_train.drop(columns=high_cardinality_cols)
+X_test = X_test.drop(columns=high_cardinality_cols)
+
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import RobustScaler, OneHotEncoder
+
+
+def make_preprocessor():
+    #Issue 5: RobustScaler (median/IQR) instead of StandardScaler, less thrown off by outliers
+    numeric_transformer = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', RobustScaler())
+    ])
+
+    categorical_transformer = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='constant', fill_value='Unknown')),
+        ('onehot', OneHotEncoder(drop='first', handle_unknown='ignore'))
+    ])
+
+    return ColumnTransformer(transformers=[
+        ('num', numeric_transformer, num_cols),
+        ('cat', categorical_transformer, categorical_cols)
+    ])
 
 
 #####
-#Model Development
-#
-#AUDIT FIX overview:
-# At this stage the dataset has been:
-# - validated for data quality
-# - stripped of leakage and identifier variables
-# - split into training and testing sets
-# - preprocessed using statistics learned only from the
-#   training data to avoid data leakage.
-# The processed training data are now used for
-# hyperparameter tuning and model training.
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
 
+#Class imbalance (69/31 survived/died): class_weight="balanced" so the minority class isn't ignored.
+#SMOTE was considered too, but skipped. 136 rows is small to synthesize minority examples from, and it needs an extra imblearn
+# dependency for what class_weight/scale_pos_weight already handle here.
 # Set up grid search for Logistic Regression
-logreg = LogisticRegression(max_iter=config.LOGREG_MAX_ITER, random_state=42)
-param_grid_lr = {'C': config.LR_C_VALUES }
-grid_lr = GridSearchCV(logreg, param_grid_lr, cv=config.CV_FOLDS, scoring='roc_auc')
+lr_pipeline = Pipeline(steps=[
+    ('preprocessor', make_preprocessor()),
+    ('classifier', LogisticRegression(max_iter=config.LOGREG_MAX_ITER, random_state=config.RANDOM_STATE, class_weight='balanced'))
+])
+param_grid_lr = {'classifier__C': config.LR_C_VALUES}
+grid_lr = GridSearchCV(lr_pipeline, param_grid_lr, cv=config.CV_FOLDS, scoring='roc_auc')
 grid_lr.fit(X_train, y_train)
 
 print("Best parameters (Logistic Regression):", grid_lr.best_params_)
@@ -409,12 +377,15 @@ logreg_best = grid_lr.best_estimator_
 from sklearn.ensemble import RandomForestClassifier
 
 # Set up grid search for Random Forest
-rf = RandomForestClassifier(random_state=42)
+rf_pipeline = Pipeline(steps=[
+    ('preprocessor', make_preprocessor()),
+    ('classifier', RandomForestClassifier(random_state=config.RANDOM_STATE, class_weight='balanced'))
+])
 param_grid_rf = {
-    'n_estimators': config.RF_N_ESTIMATORS,
-    'max_depth': config.RF_MAX_DEPTH
+    'classifier__n_estimators': config.RF_N_ESTIMATORS,
+    'classifier__max_depth': config.RF_MAX_DEPTH
 }
-grid_rf = GridSearchCV(rf, param_grid_rf, cv=config.CV_FOLDS, scoring='roc_auc')
+grid_rf = GridSearchCV(rf_pipeline, param_grid_rf, cv=config.CV_FOLDS, scoring='roc_auc')
 grid_rf.fit(X_train, y_train)
 
 print("Best parameters (Random Forest):", grid_rf.best_params_)
@@ -422,39 +393,100 @@ rf_best = grid_rf.best_estimator_
 
 import xgboost as xgb
 
-xgb_clf = xgb.XGBClassifier(random_state=42, eval_metric='logloss')
+#XGBoost's equivalent of class_weight is scale_pos_weight: negative/positive count ratio
+scale_pos_weight = (y_train == 0).sum() / (y_train == 1).sum()
+
+xgb_pipeline = Pipeline(steps=[
+    ('preprocessor', make_preprocessor()),
+    ('classifier', xgb.XGBClassifier(random_state=config.RANDOM_STATE, eval_metric='logloss', scale_pos_weight=scale_pos_weight))
+])
 param_grid_xgb = {
-    'n_estimators': config.XGB_N_ESTIMATORS,
-    'max_depth': config.XGB_MAX_DEPTH
+    'classifier__n_estimators': config.XGB_N_ESTIMATORS,
+    'classifier__max_depth': config.XGB_MAX_DEPTH
 }
-grid_xgb = GridSearchCV(xgb_clf, param_grid_xgb, cv=config.CV_FOLDS, scoring='roc_auc')
+grid_xgb = GridSearchCV(xgb_pipeline, param_grid_xgb, cv=config.CV_FOLDS, scoring='roc_auc')
 grid_xgb.fit(X_train, y_train)
 
 print("Best parameters (XGBoost):", grid_xgb.best_params_)
 xgb_best = grid_xgb.best_estimator_
 
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, ConfusionMatrixDisplay, roc_curve
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, ConfusionMatrixDisplay, roc_curve, precision_recall_curve, make_scorer
+from sklearn.dummy import DummyClassifier
+from sklearn.model_selection import StratifiedGroupKFold, cross_validate
+
+#majority-class baseline, so the real models have something to beat
+baseline = DummyClassifier(strategy='most_frequent', random_state=config.RANDOM_STATE)
+baseline.fit(X_train, y_train)
 
 models = {
+    'Baseline (Majority Class)': baseline,
     'Logistic Regression': logreg_best,
     'Random Forest': rf_best,
     'XGBoost': xgb_best
 }
 
+#Issue 7: test set is small, so re-run grouped stratified CV a few times over the
+# whole dataset and average each metric instead of trusting one split. Reusing
+# X_test is fine here, GridSearchCV above already tuned using X_train only.
+X_full = pd.concat([X_train, X_test])
+y_full = pd.concat([y_train, y_test])
+groups_full = pd.concat([groups_train, groups_test])
+
+#note: precision/recall/f1 here use each fold's default 0.5 threshold, not the
+# per-model threshold picked below
+CV_SCORING = {
+    'accuracy': 'accuracy',
+    'precision': make_scorer(precision_score, zero_division=0),
+    'recall': make_scorer(recall_score, zero_division=0),
+    'f1': make_scorer(f1_score, zero_division=0),
+    'roc_auc': 'roc_auc'
+}
+
+
+def repeated_cv_scores(pipeline, n_repeats=config.CV_REPEATS):
+    scores = {metric: [] for metric in CV_SCORING}
+    for repeat in range(n_repeats):
+        cv = StratifiedGroupKFold(n_splits=config.CV_FOLDS, shuffle=True, random_state=config.RANDOM_STATE + repeat)
+        cv_result = cross_validate(pipeline, X_full, y_full, groups=groups_full, cv=cv, scoring=CV_SCORING)
+        for metric in CV_SCORING:
+            scores[metric].extend(cv_result[f'test_{metric}'])
+    return {metric: (np.mean(vals), np.std(vals)) for metric, vals in scores.items()}
+
+
 results = {}
 
 for name, model in models.items():
     print(f"Evaluating {name}...")
-    y_pred = model.predict(X_test)
     y_proba = model.predict_proba(X_test)[:,1]
+
+    #Issue 7: pick a threshold from the precision-recall curve hitting at least
+    # config.MIN_RECALL_TARGET recall, instead of silently defaulting to 0.5.
+    if name == 'Baseline (Majority Class)':
+        threshold = 0.5
+    else:
+        precisions, recalls, pr_thresholds = precision_recall_curve(y_test, y_proba)
+        candidates = [i for i in range(len(pr_thresholds)) if recalls[i] >= config.MIN_RECALL_TARGET]
+        threshold = pr_thresholds[max(candidates, key=lambda i: precisions[i])] if candidates else 0.5
+
+    y_pred = (y_proba >= threshold).astype(int)
+
+    if name == 'Baseline (Majority Class)':
+        cv_scores = {metric: (np.nan, np.nan) for metric in CV_SCORING}
+    else:
+        cv_scores = repeated_cv_scores(model)
+
     print("Probabilities done. Metrics:")
     results[name] = {
+        'threshold': threshold,
         'accuracy': accuracy_score(y_test, y_pred),
-        'precision': precision_score(y_test, y_pred),
-        'recall': recall_score(y_test, y_pred),
-        'f1': f1_score(y_test, y_pred),
-        'roc_auc': roc_auc_score(y_test, y_proba)
+        'precision': precision_score(y_test, y_pred, zero_division=0),
+        'recall': recall_score(y_test, y_pred, zero_division=0),
+        'f1': f1_score(y_test, y_pred, zero_division=0),
+        'roc_auc_test': roc_auc_score(y_test, y_proba),
     }
+    for metric, (mean, std) in cv_scores.items():
+        results[name][f'{metric}_cv_mean'] = mean
+        results[name][f'{metric}_cv_std'] = std
     print(f"\n{name}:")
     print(results[name])
 
@@ -462,12 +494,12 @@ for name, model in models.items():
     cm = confusion_matrix(y_test, y_pred)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
     disp.plot()
-    plt.title(f'Confusion Matrix: {name}')
+    plt.title(f'Confusion Matrix: {name} (threshold={threshold:.2f})')
     plt.show(block=False)
 
     # ROC curve
-    fpr, tpr, thresholds = roc_curve(y_test, y_proba)
-    plt.plot(fpr, tpr, label=f'{name} (AUC={results[name]["roc_auc"]:.2f})')
+    fpr, tpr, _ = roc_curve(y_test, y_proba)
+    plt.plot(fpr, tpr, label=f'{name} (AUC={results[name]["roc_auc_test"]:.2f})')
 
 plt.plot([0,1], [0,1], 'k--')
 plt.xlabel('False Positive Rate')
