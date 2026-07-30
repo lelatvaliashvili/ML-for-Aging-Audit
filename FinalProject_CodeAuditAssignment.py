@@ -245,7 +245,7 @@ from sklearn.model_selection import train_test_split
 
 # Stratified split to maintain class distribution
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=config.TEST_SIZE, random_state=42, stratify=y
+    X, y, test_size=config.TEST_SIZE, random_state=config.RANDOM_STATE, stratify=y
 )
 
 ########
@@ -405,7 +405,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GridSearchCV
 
 # Set up grid search for Logistic Regression
-logreg = LogisticRegression(max_iter=config.LOGREG_MAX_ITER, random_state=42)
+logreg = LogisticRegression(max_iter=config.LOGREG_MAX_ITER, random_state=config.RANDOM_STATE)
 param_grid_lr = {'C': config.LR_C_VALUES }
 grid_lr = GridSearchCV(logreg, param_grid_lr, cv=config.CV_FOLDS, scoring='roc_auc')
 grid_lr.fit(X_train, y_train)
@@ -416,7 +416,7 @@ logreg_best = grid_lr.best_estimator_
 from sklearn.ensemble import RandomForestClassifier
 
 # Set up grid search for Random Forest
-rf = RandomForestClassifier(random_state=42)
+rf = RandomForestClassifier(random_state=config.RANDOM_STATE)
 param_grid_rf = {
     'n_estimators': config.RF_N_ESTIMATORS,
     'max_depth': config.RF_MAX_DEPTH
@@ -429,7 +429,7 @@ rf_best = grid_rf.best_estimator_
 
 import xgboost as xgb
 
-xgb_clf = xgb.XGBClassifier(random_state=42, eval_metric='logloss')
+xgb_clf = xgb.XGBClassifier(random_state=config.RANDOM_STATE, eval_metric='logloss')
 param_grid_xgb = {
     'n_estimators': config.XGB_N_ESTIMATORS,
     'max_depth': config.XGB_MAX_DEPTH
