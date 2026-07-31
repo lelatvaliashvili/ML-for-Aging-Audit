@@ -17,9 +17,9 @@ Group members: Lela, Enise
 |        |                                 | word limit                                                    
 +--------+---------------------------------+------------------------------------------------------------+
 +--------+---------------------------------+------------------------------------------------------------+
-| Lela   | Issue Identification            |                                                                
+| Lela   | Issue Identification            |Reviewed for consistency, Exploration of Issues 1,2,4,5,8,9                                                            
 +--------+---------------------------------+------------------------------------------------------------+
-| Enise  | Issue Identification            |                                                                
+| Enise  | Issue Identification            |Reviewed for consistency, Exploration of Issues 1,2,3,6,7                                                              
 +--------+---------------------------------+------------------------------------------------------------+
 +--------+---------------------------------+------------------------------------------------------------+
 | Lela   | Methodological Critique         | Reviewed for consistency, rearranged wording to fit the      
@@ -34,21 +34,23 @@ Group members: Lela, Enise
 +--------+---------------------------------+------------------------------------------------------------+
 +--------+---------------------------------+------------------------------------------------------------+
 | Lela   | Improved Implementation         | Moved preprocessing after the train/test split (Issue 1), 
-|                                          | removed identifier variables (Issue 8), removed target leakage variables (Issue 2), 
-|                                          | added domain validation (Issue 4), added feature alignment after one-hot encoding, 
-|                                          | replaced magic numbers (Issue 9).                                                              
+|                                          | removed identifier variables (Issue 8), removed target leakage 
+|                                          | variables (Issue 2), replaced magic numbers (Issue 9),
+|                                          | added domain validation (Issue 4), added feature alignment after
+|                                          | one-hot encoding                                                            
 +--------+---------------------------------+------------------------------------------------------------+
-| Enise  | Improved Implementation         | Patient-level split (Issue 3), ED flags for missing value handling (Issue 6),
-|                                          | RobustScaler (related Issue 5), Cardinality-aware encoding, (data-quality fix) 
+| Enise  | Improved Implementation         | Patient-level split (Issue 3), ED flags for missing value
+|                                          | handling (Issue 6), RobustScaler (related Issue 5), 
+|                                          | Cardinality-aware encoding, (data-quality fix),
 |                                          | Leakage fix (Issue 1), class imbalance handling (Issue 7), 
-|                                          | Outlier handling (Issue 5), corrected comparison plots, and the README.
+|                                          | Outlier handling (Issue 5), corrected comparison plots, the README.
 |                                          | evaluation fixes: a baseline model, repeated cross-validation, 
 |                                          | an classification threshold, and a global random seed.                                                         
 +--------+---------------------------------+------------------------------------------------------------+
 +--------+---------------------------------+------------------------------------------------------------+
-| Lela   | esults Summary and Reflection   |                                                               
+| Lela   | Results Summary and Reflection  |                                                               
 +--------+---------------------------------+------------------------------------------------------------+
-| Enise  |esults Summary and Reflection    |                                                                
+| Enise  | Results Summary and Reflection  |                                                                
 +--------+---------------------------------+------------------------------------------------------------+
 
 
