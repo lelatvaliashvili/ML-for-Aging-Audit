@@ -172,13 +172,7 @@ negative_los = adm_pat_icu[
     adm_pat_icu["los"] < 0
 ]
 
-
 print("Negative LOS:", len(negative_los))
-
-# Check for Negative length of stay
-negative_los = adm_pat_icu[
-    adm_pat_icu["los"] < 0
-]
 
 ########
 # The current dataset does not contain records that violate these constraints, but this step ensures
