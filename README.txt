@@ -70,11 +70,12 @@ Group members: Lela, Enise
 |        |                                 | word limit                                                            
 +--------+---------------------------------+------------------------------------------------------------+
 +--------+---------------------------------+------------------------------------------------------------+
-| Lela   | Improved Implementation         | Moved preprocessing after the train/test split and Redesigned
-|                                          | reprocessing workflow (Issue 1), removed identifier variables (Issue 8),
-|                                          | removed target leakage (Issue 2), replaced hard-coded constants in pipeline
-|                                          | (Issue 9),added domain validation (Issue 4), added feature alignment after
-|                                          | one-hot encoding,Performed exploratory comparison of outlier handling strategies
+| Lela   | Improved Implementation         | Moved preprocessing after the train/test split and redesigned
+|                                          | reprocessing workflow (Issue 1), removed identifier variables 
+|                                          | (Issue 8) and target leakage (Issue 2), replaced hard-coded constants 
+|                                          | in pipeline (Issue 9),added domain validation (Issue 4),  
+|                                          | added feature alignment after one-hot encoding,
+|                                          | Performed exploratory comparison of outlier handling strategies
 +--------+---------------------------------+------------------------------------------------------------+
 | Enise  | Improved Implementation         | Patient-level split (Issue 3), ED flags for missing value
 |                                          | handling (Issue 6), RobustScaler (related Issue 5), 
