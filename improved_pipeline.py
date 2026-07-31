@@ -151,10 +151,8 @@ invalid_admissions = adm_pat_icu[
 
 print("number of invalid dates for admission and discharge: Admissions after discharge:", len(invalid_admissions))
 
-#Ensure only valid records remain
-adm_pat_icu = adm_pat_icu[
-    adm_pat_icu["admittime"] <= adm_pat_icu["dischtime"]
-]
+#Drop only the rows already flagged invalid above (a "<=" filter would also drop rows with a missing/NaT date)
+adm_pat_icu = adm_pat_icu.drop(index=invalid_admissions.index)
 
 # Check that for all entries, ICU admission is before ICU discharge
 invalid_icu = adm_pat_icu[
@@ -163,9 +161,7 @@ invalid_icu = adm_pat_icu[
 
 print("ICU discharge before ICU admission:", len(invalid_icu))
 
-#Ensure only valid records remain
-adm_pat_icu = adm_pat_icu[
-    adm_pat_icu["intime"] <= adm_pat_icu["outtime"]]
+adm_pat_icu = adm_pat_icu.drop(index=invalid_icu.index)
 
 # Check for Negative length of stay
 negative_los = adm_pat_icu[
@@ -173,6 +169,8 @@ negative_los = adm_pat_icu[
 ]
 
 print("Negative LOS:", len(negative_los))
+
+adm_pat_icu = adm_pat_icu.drop(index=negative_los.index)
 
 ########
 # The current dataset does not contain records that violate these constraints, but this step ensures
@@ -384,19 +382,23 @@ def make_preprocessor():
 #####
 
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import GridSearchCV, StratifiedGroupKFold
 
 #Class imbalance (69/31 survived/died): class_weight="balanced" so the minority class isn't ignored.
 #SMOTE was considered too, but skipped. 136 rows is small to synthesize minority examples from, and it needs an extra imblearn
 # dependency for what class_weight/scale_pos_weight already handle here.
+
+#Issue 3 (grid search): grouped by subject_id so a patient's admissions can't split across a fold's fit/validation halves
+inner_cv = StratifiedGroupKFold(n_splits=config.CV_FOLDS, shuffle=True, random_state=config.RANDOM_STATE)
+
 # Set up grid search for Logistic Regression
 lr_pipeline = Pipeline(steps=[
     ('preprocessor', make_preprocessor()),
     ('classifier', LogisticRegression(max_iter=config.LOGREG_MAX_ITER, random_state=config.RANDOM_STATE, class_weight='balanced'))
 ])
 param_grid_lr = {'classifier__C': config.LR_C_VALUES}
-grid_lr = GridSearchCV(lr_pipeline, param_grid_lr, cv=config.CV_FOLDS, scoring='roc_auc')
-grid_lr.fit(X_train, y_train)
+grid_lr = GridSearchCV(lr_pipeline, param_grid_lr, cv=inner_cv, scoring='roc_auc')
+grid_lr.fit(X_train, y_train, groups=groups_train)
 
 print("Best parameters (Logistic Regression):", grid_lr.best_params_)
 logreg_best = grid_lr.best_estimator_
@@ -412,8 +414,8 @@ param_grid_rf = {
     'classifier__n_estimators': config.RF_N_ESTIMATORS,
     'classifier__max_depth': config.RF_MAX_DEPTH
 }
-grid_rf = GridSearchCV(rf_pipeline, param_grid_rf, cv=config.CV_FOLDS, scoring='roc_auc')
-grid_rf.fit(X_train, y_train)
+grid_rf = GridSearchCV(rf_pipeline, param_grid_rf, cv=inner_cv, scoring='roc_auc')
+grid_rf.fit(X_train, y_train, groups=groups_train)
 
 print("Best parameters (Random Forest):", grid_rf.best_params_)
 rf_best = grid_rf.best_estimator_
@@ -431,15 +433,15 @@ param_grid_xgb = {
     'classifier__n_estimators': config.XGB_N_ESTIMATORS,
     'classifier__max_depth': config.XGB_MAX_DEPTH
 }
-grid_xgb = GridSearchCV(xgb_pipeline, param_grid_xgb, cv=config.CV_FOLDS, scoring='roc_auc')
-grid_xgb.fit(X_train, y_train)
+grid_xgb = GridSearchCV(xgb_pipeline, param_grid_xgb, cv=inner_cv, scoring='roc_auc')
+grid_xgb.fit(X_train, y_train, groups=groups_train)
 
 print("Best parameters (XGBoost):", grid_xgb.best_params_)
 xgb_best = grid_xgb.best_estimator_
 
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, ConfusionMatrixDisplay, roc_curve, precision_recall_curve, make_scorer
 from sklearn.dummy import DummyClassifier
-from sklearn.model_selection import StratifiedGroupKFold, cross_validate
+from sklearn.model_selection import cross_validate, cross_val_predict
 
 #majority-class baseline, so the real models have something to beat
 baseline = DummyClassifier(strategy='most_frequent', random_state=config.RANDOM_STATE)
@@ -497,12 +499,13 @@ for i, (name, model) in enumerate(models.items()):
     print(f"Evaluating {name}...")
     y_proba = model.predict_proba(X_test)[:,1]
 
-    #Issue 7: pick a threshold from the precision-recall curve hitting at least
-    # config.MIN_RECALL_TARGET recall, instead of silently defaulting to 0.5.
+    #Issue 7: pick a threshold from the precision-recall curve hitting at least config.MIN_RECALL_TARGET
+    # recall, using out-of-fold train predictions so the test set isn't used to tune its own evaluation.
     if name == 'Baseline (Majority Class)':
         threshold = 0.5
     else:
-        precisions, recalls, pr_thresholds = precision_recall_curve(y_test, y_proba)
+        train_proba = cross_val_predict(model, X_train, y_train, groups=groups_train, cv=inner_cv, method='predict_proba')[:, 1]
+        precisions, recalls, pr_thresholds = precision_recall_curve(y_train, train_proba)
         candidates = [i for i in range(len(pr_thresholds)) if recalls[i] >= config.MIN_RECALL_TARGET]
         threshold = pr_thresholds[max(candidates, key=lambda i: precisions[i])] if candidates else 0.5
 
