@@ -15,7 +15,8 @@ Files included:
 audit_report.pdf: full audit report (Part A) and results summary/reflection (Part C)
 improved_pipeline.py: corrected pipeline (Part B)
 requirements.txt: required Python packages
-README.txt: this file
+config.py: Configuration constants for pipeline
+README.txt
 
 How to run:
 
@@ -45,7 +46,7 @@ Group members: Lela, Enise
 | Name   | Section                         | Contribution                                                |
 +--------+---------------------------------+------------------------------------------------------------+
 | Lela   | Task & Dataset Understanding    | Explored the three tables, checked shapes and column        
-|        |                                 | meanings, identified the imbalance and merge structure       
+|        |                                 | meanings, identified the potential pitfalls and merge structure
 +--------+---------------------------------+------------------------------------------------------------+
 | Enise  | Task & Dataset Understanding    | Reviewed for consistency, rearranged wording to fit the      
 |        |                                 | word limit                                                    
@@ -63,17 +64,17 @@ Group members: Lela, Enise
 |                                          | and did go through to the relevant lecture material                                                           
 +--------+---------------------------------+------------------------------------------------------------+
 +--------+---------------------------------+------------------------------------------------------------+
-| Lela   | Improvement Plan                | Created general work plan based on the issues                                                              
+| Lela   | Improvement Plan                | Created improvement plan based on the issues
 +--------+---------------------------------+------------------------------------------------------------+
 | Enise  | Improvement Plan                | Reviewed for consistency, rearranged wording to fit the      
 |        |                                 | word limit                                                            
 +--------+---------------------------------+------------------------------------------------------------+
 +--------+---------------------------------+------------------------------------------------------------+
-| Lela   | Improved Implementation         | Moved preprocessing after the train/test split (Issue 1), 
-|                                          | removed identifier variables (Issue 8), removed target leakage 
-|                                          | variables (Issue 2), replaced magic numbers (Issue 9),
-|                                          | added domain validation (Issue 4), added feature alignment after
-|                                          | one-hot encoding                                                            
+| Lela   | Improved Implementation         | Moved preprocessing after the train/test split and Redesigned
+|                                          | reprocessing workflow (Issue 1), removed identifier variables (Issue 8),
+|                                          | removed target leakage (Issue 2), replaced hard-coded constants in pipeline
+|                                          | (Issue 9),added domain validation (Issue 4), added feature alignment after
+|                                          | one-hot encoding,Performed exploratory comparison of outlier handling strategies
 +--------+---------------------------------+------------------------------------------------------------+
 | Enise  | Improved Implementation         | Patient-level split (Issue 3), ED flags for missing value
 |                                          | handling (Issue 6), RobustScaler (related Issue 5), 
@@ -84,7 +85,7 @@ Group members: Lela, Enise
 |                                          | an classification threshold, and a global random seed.                                                         
 +--------+---------------------------------+------------------------------------------------------------+
 +--------+---------------------------------+------------------------------------------------------------+
-| Lela   | Results Summary and Reflection  | Explained the overall results, added issue related explanation                                                         
+| Lela   | Results Summary and Reflection  | Explained the overall results, added Tables and issue related explanation
 +--------+---------------------------------+------------------------------------------------------------+
 | Enise  | Results Summary and Reflection  | Provided results table and graphics, reviewed for consistency                                                               
 +--------+---------------------------------+------------------------------------------------------------+
