@@ -244,7 +244,8 @@ from sklearn.model_selection import GroupShuffleSplit
 # Issue 1: Split data before preprocessing to prevent data leakage.
 # Issue 3: split by subject_id, not by row, so a patient can't end up in both sets.
 # Tradeoff: GroupShuffleSplit can't also stratify by y like train_test_split did.
-# TODO: tradeoff justification
+# so the death rate may differ by chance, repeated StratifiedGroupKFold gives a more balanced and reliable evaluation.
+
 #####
 gss = GroupShuffleSplit(n_splits=1, test_size=config.TEST_SIZE, random_state=config.RANDOM_STATE)
 train_idx, test_idx = next(gss.split(X, y, groups=X["subject_id"]))
@@ -474,9 +475,7 @@ def repeated_cv_scores(pipeline, n_repeats=config.CV_REPEATS):
 results = {}
 
 #Plotting bug fix: ConfusionMatrixDisplay.plot() creates and activates a new
-# figure each call, so a bare plt.plot() for the ROC line right after it was
-# landing on that same confusion-matrix figure instead of a shared ROC plot,
-# and only the last model's confusion-matrix figure ever showed a legend/title.
+# figure each call, so they were on top of each other and only the last one was visible. 
 # Dedicated figures/axes created up front and plotted onto explicitly fixes both.
 n_models = len(models)
 n_cols = 2
