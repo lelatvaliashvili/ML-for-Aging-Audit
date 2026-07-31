@@ -473,7 +473,20 @@ def repeated_cv_scores(pipeline, n_repeats=config.CV_REPEATS):
 
 results = {}
 
-for name, model in models.items():
+#Plotting bug fix: ConfusionMatrixDisplay.plot() creates and activates a new
+# figure each call, so a bare plt.plot() for the ROC line right after it was
+# landing on that same confusion-matrix figure instead of a shared ROC plot,
+# and only the last model's confusion-matrix figure ever showed a legend/title.
+# Dedicated figures/axes created up front and plotted onto explicitly fixes both.
+n_models = len(models)
+n_cols = 2
+n_rows = -(-n_models // n_cols)  # ceil division
+cm_fig, cm_axes = plt.subplots(n_rows, n_cols, figsize=(5.5 * n_cols, 5.2 * n_rows))
+cm_axes = cm_axes.ravel()
+
+roc_fig, roc_ax = plt.subplots(figsize=(6, 6))
+
+for i, (name, model) in enumerate(models.items()):
     print(f"Evaluating {name}...")
     y_proba = model.predict_proba(X_test)[:,1]
 
@@ -508,21 +521,32 @@ for name, model in models.items():
     print(f"\n{name}:")
     print(results[name])
 
-    # Confusion matrix
+    # Confusion matrix, plotted onto its own slot in the shared grid
     cm = confusion_matrix(y_test, y_pred)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-    disp.plot()
-    plt.title(f'Confusion Matrix: {name} (threshold={threshold:.2f})')
-    plt.show(block=False)
+    disp.plot(ax=cm_axes[i], colorbar=False)
+    r = results[name]
+    cm_axes[i].set_title(
+        f"{name} (threshold={threshold:.2f})\n"
+        f"Acc={r['accuracy']:.2f}  Prec={r['precision']:.2f}  "
+        f"Rec={r['recall']:.2f}  F1={r['f1']:.2f}  AUC={r['roc_auc_test']:.2f}",
+        fontsize=10,
+    )
 
-    # ROC curve
+    # ROC curve, plotted onto the dedicated shared ROC axes
     fpr, tpr, _ = roc_curve(y_test, y_proba)
-    plt.plot(fpr, tpr, label=f'{name} (AUC={results[name]["roc_auc_test"]:.2f})')
+    roc_ax.plot(fpr, tpr, label=f'{name} (AUC={results[name]["roc_auc_test"]:.2f})')
 
-plt.plot([0,1], [0,1], 'k--')
-plt.xlabel('False Positive Rate')
-plt.ylabel('True Positive Rate')
-plt.title('ROC Curve (All Models)')
-plt.legend()
+# hide any unused confusion-matrix subplot slots (e.g. odd number of models)
+for ax in cm_axes[n_models:]:
+    ax.axis("off")
+cm_fig.suptitle('Confusion Matrices — All Models', fontsize=14)
+cm_fig.tight_layout()
+
+roc_ax.plot([0,1], [0,1], 'k--')
+roc_ax.set_xlabel('False Positive Rate')
+roc_ax.set_ylabel('True Positive Rate')
+roc_ax.set_title('ROC Curve (All Models)')
+roc_ax.legend()
 plt.show()
 
