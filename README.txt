@@ -25,12 +25,14 @@ Group members: Lela, Enise
 | Lela   | Methodological Critique         | Reviewed for consistency, rearranged wording to fit the      
 |        |                                 | word limit                                                                
 +--------+---------------------------------+------------------------------------------------------------+
-| Enise  | Methodological Critique         |                                                                
+| Enise  | Methodological Critique         | Explored through the pipeline to identify methodological choices 
+|                                          | and did go through to the relevant lecture material                                                           
 +--------+---------------------------------+------------------------------------------------------------+
 +--------+---------------------------------+------------------------------------------------------------+
-| Lela   | Improvement Plan                |                                                               
+| Lela   | Improvement Plan                | Created general work plan based on the issues                                                              
 +--------+---------------------------------+------------------------------------------------------------+
-| Enise  | Improvement Plan                |                                                                
+| Enise  | Improvement Plan                | Reviewed for consistency, rearranged wording to fit the      
+|        |                                 | word limit                                                            
 +--------+---------------------------------+------------------------------------------------------------+
 +--------+---------------------------------+------------------------------------------------------------+
 | Lela   | Improved Implementation         | Moved preprocessing after the train/test split (Issue 1), 
@@ -41,16 +43,16 @@ Group members: Lela, Enise
 +--------+---------------------------------+------------------------------------------------------------+
 | Enise  | Improved Implementation         | Patient-level split (Issue 3), ED flags for missing value
 |                                          | handling (Issue 6), RobustScaler (related Issue 5), 
-|                                          | Cardinality-aware encoding, (data-quality fix),
+|                                          | Cardinality-aware encoding (data-quality fix),
 |                                          | Leakage fix (Issue 1), class imbalance handling (Issue 7), 
 |                                          | Outlier handling (Issue 5), corrected comparison plots, the README.
 |                                          | evaluation fixes: a baseline model, repeated cross-validation, 
 |                                          | an classification threshold, and a global random seed.                                                         
 +--------+---------------------------------+------------------------------------------------------------+
 +--------+---------------------------------+------------------------------------------------------------+
-| Lela   | Results Summary and Reflection  |                                                               
+| Lela   | Results Summary and Reflection  | Explained the overall results, added issue related explanation                                                         
 +--------+---------------------------------+------------------------------------------------------------+
-| Enise  | Results Summary and Reflection  |                                                                
+| Enise  | Results Summary and Reflection  | Provided results table and graphics, reviewed for consistency                                                               
 +--------+---------------------------------+------------------------------------------------------------+
 
 
