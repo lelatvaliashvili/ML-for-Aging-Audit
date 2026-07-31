@@ -1,8 +1,8 @@
 Project: Improved ML Pipeline for Hospital Mortality Prediction
 Final Project: Code Auditing and Improvement
 
-Lela Tvaliashvili - - MSc. Data Science @ FU
-Enise Irem Colak - - MSc. Data Science @ FU
+Lela Tvaliashvili - 5597957 - MSc. Data Science @ FU
+Enise Irem Colak - 5593394 - MSc. Data Science @ FU
 
 Description: 
 This project audits and improves a flawed machine learning pipeline that predicts
