@@ -258,10 +258,14 @@ X_test = X.iloc[test_idx].drop(columns=["subject_id"])
 y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
 
 ########
+# Fill missing values in numeric variables with median
 # Issue 6: Missing Value Handling
-# Determine missing value rate using only the training data. This ensures that the information from the test set does not influence the preprocessing decisions.
-# Missingness pattern is inspected before imputation, variables such as emergency department timestamps (edregtime, edouttime) are likely related to observed clinical characteristics, while language, religion, etc are more likely missing at random.
-# Features with more than 50% missing observations are removed to avoid relying on majority class. The same columns are then excluded from both the training and test sets for feature consistency.
+# Audit Fix:
+# A missingness pattern is inspected before chosing an imputation strategy. We do not assume missing all missing values occur randomly.
+# edregtime/edouttime are blank for every ELECTIVE admission (no ED visit), so missingness itself is a signal. That is why missingness indicators are created from these variables.
+# For variables such as language and religion, no similar pattern was identified. Therefore, they are treated as missing at random based on general domain knowledge
+# rather than a formal MCAR/MAR/MNAR analysis, given the dataset is small.
+# Other columns exceeding the missing-value threshold are removed as they contain insufficient information for modeling reliably. The same columns are then excluded from both the training and test sets for feature consistency
 ########
 
 missing_rate = X_train.isnull().mean().sort_values(ascending=False)
@@ -277,31 +281,19 @@ cols_to_drop = missing_rate[missing_rate > threshold].index.tolist()
 X_train = X_train.drop(columns=cols_to_drop)
 X_test = X_test.drop(columns=cols_to_drop)
 
-########
-# Fill missing values in numeric variables with median
-# Issue 6: Missing Value Handling
-# Audit Fix:
-# Learn median values from the training data only and use the same statistics to impute both datasets,
-# preventing data leakage.
-########
-
-#Issue 6: edregtime/edouttime are blank for every ELECTIVE admission (no ED visit),
-# so the missingness itself is signal. Keep it as a flag before the raw columns get dropped below.
 for col in ["edregtime", "edouttime"]:
     if col in X_train.columns:
         X_train[f"{col}_missing"] = X_train[col].isna().astype(int)
         X_test[f"{col}_missing"] = X_test[col].isna().astype(int)
 
-# Cap LOS at 99th percentile to handle extreme outliers
 #######
 # Audit Fix:
 # Issue 5: Outlier Analysis
-# The updated code learns the clipping threshold from the training data only and then applies the same threshold to the test data to avoid leakage.
 # Inspecting outliers with IQR rule and comparing it with existing 0.99th percentile clipping
-# demonstrated that 14 patients (10% of the dataset) get marked as outliers with IQR, most of whom are critically ill patients with long stays,
-# As the 99th percentile only clips 2 extreme samples, it ensures that most of the values are saved for training set. Therefore, IQR is computed
-# solely for exploration purposes, and clipping using the 99th percentile is what is being retained in the pipeline, even though the initial audit identified it as
-# a flaw that needed to be addressed.
+# demonstrated that 14 patients (around 10% of the dataset) get marked as outliers with IQR,  while they are critically ill patients with long stays.
+# As the 99th percentile only clips 2 extreme samples which motivated moving towards retaining all observations. Therefore, IQR is computed
+# solely for exploration purposes. This further motivated to apply log1p transformation for reducing skewness instead of removing or clipping the values. Since it does not have fitted parameters,
+# log1p transform can be applied to both train and test sets without resulting in data leakage.
 #######
 
 #inspect distribution
@@ -334,13 +326,8 @@ print(f"IQR upper bound: {upper_iqr:.2f}")
 print("Outliers detected with IQR:",
       (X_train["los"] > upper_iqr).sum())
 
-#TODO: log1p or not?
-#log1p has no fitted parameters, so it's safe to apply to both sets directly
-#X_train['los'] = np.log1p(X_train['los'])
-#X_test['los'] = np.log1p(X_test['los'])
-
-X_train['los'] = X_train['los'].clip(upper=upper_pct)
-X_test['los'] = X_test['los'].clip(upper=upper_pct)
+X_train['los'] = np.log1p(X_train['los'])
+X_test['los'] = np.log1p(X_test['los'])
 
 #Issue 1: imputer, scaler and encoder now live inside a Pipeline (below) instead of
 # being fit on all of X_train up front, so GridSearchCV refits them per CV fold
