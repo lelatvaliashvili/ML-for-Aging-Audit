@@ -255,9 +255,9 @@ y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
 # Fill missing values in numeric variables with median
 # Issue 6: Missing Value Handling
 # Audit Fix:
-# A missingness pattern is inspected before chosing an imputation strategy. We do not assume missing all missing values occur randomly.
+# A missingness pattern is inspected before choosing an imputation strategy. We do not assume missing all missing values occur randomly.
 # edregtime/edouttime are blank for every ELECTIVE admission (no ED visit), so missingness itself is a signal. That is why missingness indicators are created from these variables.
-# For variables such as language and religion, no similar pattern was identified. Therefore, they are treated as missing at random based on general domain knowledge
+# For variables such as language and religion, no similar pattern was identified. Therefore, they are assumed to be missing at random based on general domain knowledge
 # rather than a formal MCAR/MAR/MNAR analysis, given the dataset is small.
 # Other columns exceeding the missing-value threshold are removed as they contain insufficient information for modeling reliably. The same columns are then excluded from both the training and test sets for feature consistency
 ########
@@ -284,7 +284,7 @@ for col in ["edregtime", "edouttime"]:
 # Audit Fix:
 # Issue 5: Outlier Analysis
 # Inspecting outliers with IQR rule and comparing it with existing 0.99th percentile clipping
-# demonstrated that 14 patients (around 10% of the dataset) get marked as outliers with IQR,  while they are critically ill patients with long stays.
+# demonstrated that 14 patients (around 10% of the dataset) get marked as outliers with IQR, while many correspond to plausible long stays due to clinical reasons.
 # As the 99th percentile only clips 2 extreme samples which motivated moving towards retaining all observations. Therefore, IQR is computed
 # solely for exploration purposes. This further motivated to apply log1p transformation for reducing skewness instead of removing or clipping the values. Since it does not have fitted parameters,
 # log1p transform can be applied to both train and test sets without resulting in data leakage.
