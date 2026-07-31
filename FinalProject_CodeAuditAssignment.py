@@ -172,13 +172,7 @@ negative_los = adm_pat_icu[
     adm_pat_icu["los"] < 0
 ]
 
-
 print("Negative LOS:", len(negative_los))
-
-#Ensure only valid records remain
-adm_pat_icu = adm_pat_icu[
-    adm_pat_icu["los"] >= 0
-]
 
 ########
 # The current dataset does not contain records that violate these constraints, but this step ensures
@@ -328,6 +322,20 @@ print("Outliers detected with IQR:",
 
 X_train['los'] = np.log1p(X_train['los'])
 X_test['los'] = np.log1p(X_test['los'])
+
+#diagnosis is free text with a long tail (95 unique values on 130 rows), most seen only once or twice. Put rare values into "Other" using training counts only,
+# so the model can still use the common, clinically distinct diagnoses without the high-cardinality filter dropping the column entirely.
+if 'diagnosis' in X_train.columns:
+    diagnosis_counts = X_train['diagnosis'].value_counts()
+    common_diagnoses = diagnosis_counts[diagnosis_counts >= config.DIAGNOSIS_MIN_COUNT].index
+
+    is_rare_train = X_train['diagnosis'].notna() & ~X_train['diagnosis'].isin(common_diagnoses)
+    X_train.loc[is_rare_train, 'diagnosis'] = 'Other'
+
+    is_rare_test = X_test['diagnosis'].notna() & ~X_test['diagnosis'].isin(common_diagnoses)
+    X_test.loc[is_rare_test, 'diagnosis'] = 'Other'
+
+    print("Diagnosis categories kept:", list(common_diagnoses) + ['Other'])
 
 #Issue 1: imputer, scaler and encoder now live inside a Pipeline (below) instead of
 # being fit on all of X_train up front, so GridSearchCV refits them per CV fold
