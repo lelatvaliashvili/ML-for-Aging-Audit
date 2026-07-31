@@ -4,6 +4,54 @@ Final Project: Code Auditing and Improvement
 Lela Tvaliashvili - - MSc. Data Science @ FU
 Enise Irem Colak - - MSc. Data Science @ FU
 
+CONTRIBUTIONS
+=============
+Group members: Lela, Enise
++--------+---------------------------------+------------------------------------------------------------+
+| Name   | Section                         | Contribution                                                |
++--------+---------------------------------+------------------------------------------------------------+
+| Lela   | Task & Dataset Understanding    | Explored the three tables, checked shapes and column        
+|        |                                 | meanings, identified the imbalance and merge structure       
++--------+---------------------------------+------------------------------------------------------------+
+| Enise  | Task & Dataset Understanding    | Reviewed for consistency, rearranged wording to fit the      
+|        |                                 | word limit                                                    
++--------+---------------------------------+------------------------------------------------------------+
++--------+---------------------------------+------------------------------------------------------------+
+| Lela   | Issue Identification            |                                                                
++--------+---------------------------------+------------------------------------------------------------+
+| Enise  | Issue Identification            |                                                                
++--------+---------------------------------+------------------------------------------------------------+
++--------+---------------------------------+------------------------------------------------------------+
+| Lela   | Methodological Critique         | Reviewed for consistency, rearranged wording to fit the      
+|        |                                 | word limit                                                                
++--------+---------------------------------+------------------------------------------------------------+
+| Enise  | Methodological Critique         |                                                                
++--------+---------------------------------+------------------------------------------------------------+
++--------+---------------------------------+------------------------------------------------------------+
+| Lela   | Improvement Plan                |                                                               
++--------+---------------------------------+------------------------------------------------------------+
+| Enise  | Improvement Plan                |                                                                
++--------+---------------------------------+------------------------------------------------------------+
++--------+---------------------------------+------------------------------------------------------------+
+| Lela   | Improved Implementation         | Moved preprocessing after the train/test split (Issue 1), 
+|                                          | removed identifier variables (Issue 8), removed target leakage variables (Issue 2), 
+|                                          | added domain validation (Issue 4), added feature alignment after one-hot encoding, 
+|                                          | replaced magic numbers (Issue 9).                                                              
++--------+---------------------------------+------------------------------------------------------------+
+| Enise  | Improved Implementation         | Patient-level split (Issue 3), ED flags for missing value handling (Issue 6),
+|                                          | RobustScaler (related Issue 5), Cardinality-aware encoding, (data-quality fix) 
+|                                          | Leakage fix (Issue 1), class imbalance handling (Issue 7), 
+|                                          | Outlier handling (Issue 5), corrected comparison plots, and the README.
+|                                          | evaluation fixes: a baseline model, repeated cross-validation, 
+|                                          | an classification threshold, and a global random seed.                                                         
++--------+---------------------------------+------------------------------------------------------------+
++--------+---------------------------------+------------------------------------------------------------+
+| Lela   | esults Summary and Reflection   |                                                               
++--------+---------------------------------+------------------------------------------------------------+
+| Enise  |esults Summary and Reflection    |                                                                
++--------+---------------------------------+------------------------------------------------------------+
+
+
 Description: 
 This project audits and improves a flawed machine learning pipeline that predicts
  in-hospital mortality (hospital_expire_flag) using the dataset (PATIENTS, ADMISSIONS, ICUSTAYS). 
