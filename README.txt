@@ -86,7 +86,7 @@ Group members: Lela, Enise
 |                                          | an classification threshold, and a global random seed.                                                         
 +--------+---------------------------------+------------------------------------------------------------+
 +--------+---------------------------------+------------------------------------------------------------+
-| Lela   | Results Summary and Reflection  | Explained the overall results, added Tables and issue related explanation
+| Lela   | Results Summary and Reflection  | Explained the overall results, added Tables, issue related explanation
 +--------+---------------------------------+------------------------------------------------------------+
 | Enise  | Results Summary and Reflection  | Provided results table and graphics, reviewed for consistency                                                               
 +--------+---------------------------------+------------------------------------------------------------+
