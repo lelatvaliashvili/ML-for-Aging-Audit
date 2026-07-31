@@ -126,11 +126,14 @@ plt.show()
 
 
 #######
-# Domain Validation (Issue #4 )
-# Add validation of the dataset beofre preprocessing by checking temporal consistency
-# and clinically meaningful constraints. 
+# Issue 4: Domain Validation
+# Audit Fix:
+# Add validation of the dataset before preprocessing by checking temporal consistency
+# and clinically meaningful constraints such as admission before discharge, ICU admission before ICU discharge, non-negative LOS values.
+# Therefore, EDA is followed by validation before cleaning
+# Age was not relevant as MIMIC intentionally shifts dates for privacy, so deriving age this way is unreliable,
+# therefore ensuring plausible age range is intentionally omitted even though initial audit report included checking realistic age.
 #######
-
 date_columns= [
     'admittime', 'dischtime',
     'intime', 'outtime',
@@ -148,6 +151,11 @@ invalid_admissions = adm_pat_icu[
 
 print("number of invalid dates for admission and discharge: Admissions after discharge:", len(invalid_admissions))
 
+#Ensure only valid records remain
+adm_pat_icu = adm_pat_icu[
+    adm_pat_icu["admittime"] <= adm_pat_icu["dischtime"]
+]
+
 # Check that for all entries, ICU admission is before ICU discharge
 invalid_icu = adm_pat_icu[
     adm_pat_icu["intime"] > adm_pat_icu["outtime"]
@@ -155,31 +163,35 @@ invalid_icu = adm_pat_icu[
 
 print("ICU discharge before ICU admission:", len(invalid_icu))
 
+#Ensure only valid records remain
+adm_pat_icu = adm_pat_icu[
+    adm_pat_icu["intime"] <= adm_pat_icu["outtime"]]
+
 # Check for Negative length of stay
 negative_los = adm_pat_icu[
     adm_pat_icu["los"] < 0
 ]
 
+
 print("Negative LOS:", len(negative_los))
 
-#Issue 4: rows failing these checks are data entry errors, so drop them instead of
-# just printing a count. Currently 0 rows are flagged in this dataset.
-invalid_rows = invalid_admissions.index.union(invalid_icu.index).union(negative_los.index)
-print(f"Dropping {len(invalid_rows)} rows that failed domain validation")
-adm_pat_icu = adm_pat_icu.drop(index=invalid_rows)
+# Check for Negative length of stay
+negative_los = adm_pat_icu[
+    adm_pat_icu["los"] < 0
+]
 
-#age was not relevant cause MIMIC intentionally shifts dates for privacy, so deriving age this way is unreliable,
-# therefore this check is intentionally omitted.
-"""
-adm_pat_icu["age"] = (
-    adm_pat_icu["admittime"].dt.year
-    - adm_pat_icu["dob"].dt.year
-)"""
-
+########
+# The current dataset does not contain records that violate these constraints, but this step ensures
+# that logically inconsistent observations are excluded if they are encountered in future datasets.
+#######
 
 #######
-# Issue 2, Issue 8: Feature Selection, Target Leakage, Identifier Variables
-# Remove identifier variables and leakage features that reveal information unavailble during prediction time
+# Audit Fix:
+# Issue 2, Issue 9: Target Leakage, Feature Selection, Identifier Variables
+# Remove variables that would not be available at prediction time
+# (target leakage) together with identifier attributes that uniquely
+# identify patients or admissions but do not contain predictive
+# clinical information.
 #######
 
 #remove the columns needed for domain validation only or convert them back to strings
@@ -191,9 +203,9 @@ validation_only_columns = [
 
 #adm_pat_icu = adm_pat_icu.drop(columns=validation_only_columns)
 
-adm_pat_icu["admittime"] = adm_pat_icu["admittime"].astype(str)
-adm_pat_icu["intime"] = adm_pat_icu["intime"].astype(str)
-adm_pat_icu["dob"] = adm_pat_icu["dob"].astype(str)
+#adm_pat_icu["admittime"] = adm_pat_icu["admittime"].astype(str)
+#adm_pat_icu["intime"] = adm_pat_icu["intime"].astype(str)
+#adm_pat_icu["dob"] = adm_pat_icu["dob"].astype(str)
 
 leakage_columns = [
     "dod",
@@ -212,8 +224,8 @@ id_columns = [
     "row_id_y",
     "row_id"
 ]
-#Issue 3: subject_id stays for now, GroupShuffleSplit needs it; dropped from features after the split.
 
+#Issue 3: subject_id stays for now, GroupShuffleSplit needs it; dropped from features after the split.
 columns_to_drop = [
     col
     for col in leakage_columns + id_columns
@@ -232,6 +244,7 @@ from sklearn.model_selection import GroupShuffleSplit
 # Issue 1: Split data before preprocessing to prevent data leakage.
 # Issue 3: split by subject_id, not by row, so a patient can't end up in both sets.
 # Tradeoff: GroupShuffleSplit can't also stratify by y like train_test_split did.
+# TODO: tradeoff justification
 #####
 gss = GroupShuffleSplit(n_splits=1, test_size=config.TEST_SIZE, random_state=config.RANDOM_STATE)
 train_idx, test_idx = next(gss.split(X, y, groups=X["subject_id"]))
@@ -264,6 +277,14 @@ cols_to_drop = missing_rate[missing_rate > threshold].index.tolist()
 X_train = X_train.drop(columns=cols_to_drop)
 X_test = X_test.drop(columns=cols_to_drop)
 
+########
+# Fill missing values in numeric variables with median
+# Issue 6: Missing Value Handling
+# Audit Fix:
+# Learn median values from the training data only and use the same statistics to impute both datasets,
+# preventing data leakage.
+########
+
 #Issue 6: edregtime/edouttime are blank for every ELECTIVE admission (no ED visit),
 # so the missingness itself is signal. Keep it as a flag before the raw columns get dropped below.
 for col in ["edregtime", "edouttime"]:
@@ -271,14 +292,22 @@ for col in ["edregtime", "edouttime"]:
         X_train[f"{col}_missing"] = X_train[col].isna().astype(int)
         X_test[f"{col}_missing"] = X_test[col].isna().astype(int)
 
+# Cap LOS at 99th percentile to handle extreme outliers
+#######
+# Audit Fix:
 # Issue 5: Outlier Analysis
-# 99th percentile and IQR disagree on how many los values are "outliers" (2 vs 14),
-# and the values flagged are real, legitimate long stays, not data errors.
-# So instead of clipping either way, log-transform los to shrink their pull.
+# The updated code learns the clipping threshold from the training data only and then applies the same threshold to the test data to avoid leakage.
+# Inspecting outliers with IQR rule and comparing it with existing 0.99th percentile clipping
+# demonstrated that 14 patients (10% of the dataset) get marked as outliers with IQR, most of whom are critically ill patients with long stays,
+# As the 99th percentile only clips 2 extreme samples, it ensures that most of the values are saved for training set. Therefore, IQR is computed
+# solely for exploration purposes, and clipping using the 99th percentile is what is being retained in the pipeline, even though the initial audit identified it as
+# a flaw that needed to be addressed.
+#######
+
 #inspect distribution
 print(X_train["los"].describe())
 
-#99th percentile, for exploration only
+#For 99th percentile, check how many observations would be clipped
 upper_pct = X_train["los"].quantile(config.LOS_CLIP_QUANTILE)
 n_outliers_pct = (X_train["los"] > upper_pct).sum()
 
@@ -286,7 +315,7 @@ n_outliers_pct = (X_train["los"] > upper_pct).sum()
 plt.figure(figsize=(6,4))
 plt.boxplot(X_train["los"], vert=False)
 plt.xlabel("Length of Stay (days)")
-plt.title("LOS Distribution Before Log Transform")
+plt.title("LOS Distribution Before Clipping")
 plt.show()
 
 print(f"99th percentile: {upper_pct:.2f}")
@@ -305,14 +334,16 @@ print(f"IQR upper bound: {upper_iqr:.2f}")
 print("Outliers detected with IQR:",
       (X_train["los"] > upper_iqr).sum())
 
+#TODO: log1p or not?
 #log1p has no fitted parameters, so it's safe to apply to both sets directly
-X_train['los'] = np.log1p(X_train['los'])
-X_test['los'] = np.log1p(X_test['los'])
+#X_train['los'] = np.log1p(X_train['los'])
+#X_test['los'] = np.log1p(X_test['los'])
 
+X_train['los'] = X_train['los'].clip(upper=upper_pct)
+X_test['los'] = X_test['los'].clip(upper=upper_pct)
 
 #Issue 1: imputer, scaler and encoder now live inside a Pipeline (below) instead of
 # being fit on all of X_train up front, so GridSearchCV refits them per CV fold
-
 # Identifier columns were removed earlier and are therefore excluded.
 num_cols = X_train.select_dtypes(include='number').columns.tolist()
 
